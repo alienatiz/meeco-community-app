@@ -562,6 +562,7 @@ struct MeecoPost: Identifiable, Equatable {
     let upvoteCount: Int
     let isNotice: Bool
     let isHot: Bool
+    var thumbnailURL: URL? = nil
 
     var commentURL: URL {
         var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
@@ -994,7 +995,11 @@ struct BoardView: View {
                         Section {
                             ForEach(viewModel.posts) { post in
                                 NavigationLink(destination: PostDetailView(post: post).hideRootTabBar()) {
-                                    PostRow(post: post)
+                                    if board.id == MeecoBoard.gallery.id {
+                                        GalleryPostRow(post: post)
+                                    } else {
+                                        PostRow(post: post)
+                                    }
                                 }
                                 .onAppear {
                                     Task { await viewModel.loadNextPageIfNeeded(after: post) }
@@ -1263,6 +1268,92 @@ struct PostRow: View {
             PostStatsColumn(commentCount: post.commentCount, upvoteCount: post.upvoteCount, isDimmed: isEndedDeal)
         }
         .padding(.vertical, 6)
+    }
+}
+
+struct GalleryPostRow: View {
+    let post: MeecoPost
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            GalleryThumbnailView(url: post.thumbnailURL)
+                .frame(maxWidth: .infinity)
+                .frame(height: 190)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text(post.title)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundColor(.primary)
+                    .lineLimit(2)
+
+                HStack(spacing: 10) {
+                    Text([post.nickname, post.date].filter { !$0.isEmpty }.joined(separator: " "))
+                        .lineLimit(1)
+
+                    Spacer(minLength: 8)
+
+                    GalleryInlineStat(systemImage: "heart.fill", count: post.upvoteCount, color: .pink)
+                    GalleryInlineStat(systemImage: "text.bubble", count: post.commentCount ?? 0, color: .accentColor)
+                }
+                .font(.caption.weight(.semibold))
+                .foregroundColor(.secondary)
+            }
+        }
+        .padding(.vertical, 8)
+    }
+}
+
+struct GalleryThumbnailView: View {
+    let url: URL?
+
+    var body: some View {
+        if let url {
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case .empty:
+                    ProgressView()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(Color.secondary.opacity(0.08))
+                case .success(let image):
+                    image
+                        .resizable()
+                        .scaledToFill()
+                case .failure:
+                    placeholder
+                @unknown default:
+                    placeholder
+                }
+            }
+        } else {
+            placeholder
+        }
+    }
+
+    private var placeholder: some View {
+        ZStack {
+            Color.secondary.opacity(0.08)
+            Image(systemName: "photo")
+                .font(.largeTitle.weight(.semibold))
+                .foregroundColor(.secondary)
+        }
+    }
+}
+
+struct GalleryInlineStat: View {
+    let systemImage: String
+    let count: Int
+    let color: Color
+
+    var body: some View {
+        if count > 0 {
+            HStack(spacing: 4) {
+                Image(systemName: systemImage)
+                Text("\(count)")
+                    .monospacedDigit()
+            }
+            .foregroundColor(color)
+        }
     }
 }
 
@@ -2736,7 +2827,8 @@ struct MeecoHTMLParser {
             commentCount: commentCount,
             upvoteCount: upvoteCount,
             isNotice: isNoticeRow(rowHTML),
-            isHot: loweredRow.contains("핫글") || loweredRow.contains("hot")
+            isHot: loweredRow.contains("핫글") || loweredRow.contains("hot"),
+            thumbnailURL: mediaItems(from: rowHTML, baseURL: baseURL).first { $0.kind == .image }?.url
         )
     }
 
@@ -2759,7 +2851,8 @@ struct MeecoHTMLParser {
                 commentCount: nil,
                 upvoteCount: 0,
                 isNotice: false,
-                isHot: false
+                isHot: false,
+                thumbnailURL: nil
             )
         }
     }
@@ -3480,7 +3573,8 @@ struct MeecoHTMLParser {
             commentCount: current.commentCount ?? candidate.commentCount,
             upvoteCount: max(current.upvoteCount, candidate.upvoteCount),
             isNotice: current.isNotice || candidate.isNotice,
-            isHot: current.isHot || candidate.isHot
+            isHot: current.isHot || candidate.isHot,
+            thumbnailURL: current.thumbnailURL ?? candidate.thumbnailURL
         )
     }
 

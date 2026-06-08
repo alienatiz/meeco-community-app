@@ -180,6 +180,25 @@ final class meecoTests: XCTestCase {
         XCTAssertFalse(posts.contains { !$0.title.isEmpty && $0.title.allSatisfy(\.isNumber) })
     }
 
+    func testParserReadsGalleryListThumbnail() throws {
+        let html = """
+        <li>
+            <a class=\"list_link\" href=\"/Gallery/41490030\" title=\"저녁 하늘 사진\"></a>
+            <img src=\"/files/attach/images/2026/06/08/gallery_sky.jpg\" alt=\"저녁 하늘\" />
+            <div class=\"list_info\"><span>사진가</span><span>26.06.08.</span></div>
+        </li>
+        """
+
+        let posts = MeecoHTMLParser().posts(
+            from: html,
+            baseURL: URL(string: "https://meeco.kr/Gallery")!,
+            allowedBoardPaths: ["Gallery"]
+        )
+
+        XCTAssertEqual(posts.first?.title, "저녁 하늘 사진")
+        XCTAssertEqual(posts.first?.thumbnailURL?.absoluteString, "https://meeco.kr/files/attach/images/2026/06/08/gallery_sky.jpg")
+    }
+
     func testParserReadsMobileListLinkTitleAttribute() throws {
         let html = """
         <li>
