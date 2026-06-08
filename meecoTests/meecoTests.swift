@@ -823,17 +823,29 @@ final class meecoTests: XCTestCase {
         let html = """
         <div class=\"atc-ex\">
             <table>
-                <tr><th>구매 링크</th><td><a class=\"dis_func_link\" af_srl=\"4262\" href=\"https://click.linkprice.com/click.php?m=gmarket&a=A100682872&tu=https%3A%2F%2Fitem.gmarket.co.kr%2Fitem%3Fgoodscode%3D958106477\">https://item.gmarket.co.kr/item?goodscode=958106477</a></td></tr>
+                <tr><th>구매 링크</th><td>
+                    <a class=\"dis_func_link\" af_srl=\"4262\" href=\"https://click.linkprice.com/click.php?m=gmarket&a=A100682872&tu=https%3A%2F%2Fitem.gmarket.co.kr%2Fitem%3Fgoodscode%3D958106477\">https://item.gmarket.co.kr/item?goodscode=958106477</a>
+                    <a href=\"https://brand.naver.com/store/products/123\">네이버 바로가기</a>
+                    <a href=\"https://link.coupang.com/a/example\">쿠팡 바로가기</a>
+                </td></tr>
             </table>
         </div>
         <div class=\"xe_content\"><p>본문입니다</p></div>
         """
 
-        let link = MeecoHTMLParser().postDetail(from: html, fallbackPost: post).dealInfo?.links.first
+        let links = MeecoHTMLParser().postDetail(from: html, fallbackPost: post).dealInfo?.links ?? []
 
-        XCTAssertEqual(link?.title, "https://item.gmarket.co.kr/item?goodscode=958106477")
-        XCTAssertEqual(link?.url.host, "click.linkprice.com")
-        XCTAssertEqual(link?.isRevenueGenerating, true)
+        XCTAssertEqual(links.map(\.title), [
+            "https://item.gmarket.co.kr/item?goodscode=958106477",
+            "네이버 바로가기",
+            "쿠팡 바로가기"
+        ])
+        XCTAssertEqual(links[0].url.host, "click.linkprice.com")
+        XCTAssertEqual(links[0].isRevenueGenerating, true)
+        XCTAssertEqual(links[1].url.host, "brand.naver.com")
+        XCTAssertEqual(links[1].isRevenueGenerating, false)
+        XCTAssertEqual(links[2].url.host, "link.coupang.com")
+        XCTAssertEqual(links[2].isRevenueGenerating, true)
     }
 
     func testSpecialDealEndedStateUsesPriceBoardOnly() throws {

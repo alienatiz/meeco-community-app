@@ -2065,10 +2065,10 @@ struct SpecialDealInfoView: View {
                             Label(link.title, systemImage: link.isRevenueGenerating ? "cart.fill.badge.plus" : "cart.fill")
                                 .font(.caption.weight(.semibold))
                                 .lineLimit(1)
-                                .foregroundColor(.black.opacity(0.82))
+                                .foregroundColor(link.isRevenueGenerating ? .black.opacity(0.82) : .accentColor)
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 6)
-                                .background(Color.yellow.opacity(link.isRevenueGenerating ? 0.88 : 0.68))
+                                .background((link.isRevenueGenerating ? Color.yellow : Color.accentColor).opacity(link.isRevenueGenerating ? 0.88 : 0.12))
                                 .clipShape(RoundedRectangle(cornerRadius: 8))
                         }
                         .buttonStyle(.plain)
