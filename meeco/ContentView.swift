@@ -1797,11 +1797,7 @@ private extension View {
 
     @ViewBuilder
     func hideRootTabBar() -> some View {
-#if os(iOS)
-        self.toolbar(.hidden, for: .tabBar)
-#else
         self
-#endif
     }
 
     @ViewBuilder
