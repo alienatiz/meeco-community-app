@@ -1277,8 +1277,6 @@ struct GalleryPostRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             GalleryThumbnailView(url: post.thumbnailURL)
-                .frame(maxWidth: .infinity)
-                .frame(height: 190)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
 
             VStack(alignment: .leading, spacing: 6) {
@@ -1307,27 +1305,33 @@ struct GalleryPostRow: View {
 struct GalleryThumbnailView: View {
     let url: URL?
 
+    private let thumbnailHeight: CGFloat = 190
+
     var body: some View {
-        if let url {
-            AsyncImage(url: url) { phase in
-                switch phase {
-                case .empty:
-                    ProgressView()
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(Color.secondary.opacity(0.08))
-                case .success(let image):
-                    image
-                        .resizable()
-                        .scaledToFill()
-                case .failure:
-                    placeholder
-                @unknown default:
-                    placeholder
+        ZStack {
+            placeholder
+
+            if let url {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .empty:
+                        ProgressView()
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .scaledToFill()
+                            .frame(maxWidth: .infinity, minHeight: thumbnailHeight, maxHeight: thumbnailHeight)
+                            .clipped()
+                    case .failure:
+                        EmptyView()
+                    @unknown default:
+                        EmptyView()
+                    }
                 }
             }
-        } else {
-            placeholder
         }
+        .frame(maxWidth: .infinity, minHeight: thumbnailHeight, maxHeight: thumbnailHeight)
+        .clipped()
     }
 
     private var placeholder: some View {
@@ -1478,6 +1482,7 @@ struct MediaStack: View {
         let fittedImage = image
             .resizable()
             .scaledToFit()
+            .frame(maxWidth: .infinity, minHeight: 160)
 
         if #available(iOS 17.0, macOS 14.0, *) {
             fittedImage
