@@ -11,19 +11,30 @@ import ImageIO
 
 struct ContentView: View {
     @State private var selectedTab: MeecoAppTab = .main
+    @State private var webAction: MeecoWebAction?
 
     var body: some View {
         TabView(selection: $selectedTab) {
             ForEach(MeecoAppTab.allCases) { tab in
                 NavigationView {
-                    BoardDirectoryView(sections: tab.sections, title: tab.title)
-                }
-                .tabItem {
-                    Label(tab.title, systemImage: tab.systemImage)
+                    BoardDirectoryView(
+                        sections: tab.sections,
+                        title: tab.title,
+                        selectedTab: $selectedTab,
+                        onSearch: openRootSearch
+                    )
                 }
                 .tag(tab)
             }
         }
+        .hideRootTabBar()
+        .sheet(item: $webAction) { action in
+            WebActionView(action: action)
+        }
+    }
+
+    private func openRootSearch() {
+        webAction = MeecoWebAction(title: "검색", url: MeecoBoard.all.searchURL(query: "", category: nil))
     }
 }
 
@@ -65,6 +76,8 @@ enum MeecoAppTab: String, CaseIterable, Identifiable {
 struct BoardDirectoryView: View {
     let sections: [MeecoDirectorySection]
     let title: String
+    @Binding var selectedTab: MeecoAppTab
+    let onSearch: () -> Void
 
     var body: some View {
         List {
@@ -73,15 +86,15 @@ struct BoardDirectoryView: View {
                     ForEach(section.items) { item in
                         switch item.destination {
                         case .board(let board):
-                            NavigationLink(destination: BoardView(board: board)) {
+                            NavigationLink(destination: BoardView(board: board).hideRootTabBar()) {
                                 DirectoryItemRow(item: item)
                             }
                         case .web(let action):
-                            NavigationLink(destination: WebActionView(action: action)) {
+                            NavigationLink(destination: WebActionView(action: action).hideRootTabBar()) {
                                 DirectoryItemRow(item: item)
                             }
                         case .account:
-                            NavigationLink(destination: AccountSettingsView()) {
+                            NavigationLink(destination: AccountSettingsView().hideRootTabBar()) {
                                 DirectoryItemRow(item: item)
                             }
                         }
@@ -91,6 +104,49 @@ struct BoardDirectoryView: View {
         }
         .listStyle(.sidebar)
         .navigationTitle(title)
+        .showRootTabBar()
+        .safeAreaInset(edge: .bottom) {
+            RootNavigationBar(selectedTab: $selectedTab, onSearch: onSearch)
+        }
+    }
+}
+
+struct RootNavigationBar: View {
+    @Binding var selectedTab: MeecoAppTab
+    let onSearch: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            HStack(spacing: 4) {
+                ForEach(MeecoAppTab.allCases) { tab in
+                    Button {
+                        selectedTab = tab
+                    } label: {
+                        Image(systemName: tab.systemImage)
+                            .font(.headline.weight(selectedTab == tab ? .semibold : .regular))
+                            .foregroundColor(selectedTab == tab ? .accentColor : .secondary)
+                            .frame(width: 52, height: 48)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(tab.title)
+                }
+            }
+            .padding(.horizontal, 6)
+            .frame(height: 54)
+            .boardLiquidGlass(cornerRadius: 27)
+
+            Button(action: onSearch) {
+                Image(systemName: "magnifyingglass")
+                    .font(.headline.weight(.semibold))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            .frame(width: 54, height: 54)
+            .boardLiquidGlassButton()
+            .accessibilityLabel("검색")
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .padding(.bottom, 10)
     }
 }
 
@@ -454,6 +510,17 @@ struct MeecoBoard: Identifiable, Hashable {
 
     func writeURL(category: MeecoBoardCategory?) -> URL {
         actionURL(act: "dispBoardWrite", category: category)
+    }
+
+    func searchURL(query: String, category: MeecoBoardCategory?) -> URL {
+        var components = URLComponents(url: category?.url ?? url, resolvingAgainstBaseURL: false)
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        var queryItems = components?.queryItems ?? []
+        queryItems.removeAll { ["search_target", "search_keyword", "page"].contains($0.name) }
+        queryItems.append(URLQueryItem(name: "search_target", value: "title_content"))
+        queryItems.append(URLQueryItem(name: "search_keyword", value: trimmedQuery))
+        components?.queryItems = queryItems
+        return components?.url ?? url
     }
 
     private func actionURL(act: String, category: MeecoBoardCategory?) -> URL {
@@ -847,6 +914,7 @@ struct BoardView: View {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var viewModel: BoardViewModel
     @State private var webAction: MeecoWebAction?
+    @State private var searchText = ""
     private let refreshTimer = Timer.publish(every: 120, on: .main, in: .common).autoconnect()
 
     init(board: MeecoBoard) {
@@ -902,19 +970,9 @@ struct BoardView: View {
                     }
                 } else {
                     List {
-                        if !viewModel.topUpvotedPosts.isEmpty {
-                            Section("추천 상위 게시물") {
-                                ForEach(Array(viewModel.topUpvotedPosts.enumerated()), id: \.element.id) { index, post in
-                                    NavigationLink(destination: PostDetailView(post: post)) {
-                                        TopUpvotedPostRow(rank: index + 1, post: post)
-                                    }
-                                }
-                            }
-                        }
-
                         Section {
                             ForEach(viewModel.posts) { post in
-                                NavigationLink(destination: PostDetailView(post: post)) {
+                                NavigationLink(destination: PostDetailView(post: post).hideRootTabBar()) {
                                     PostRow(post: post)
                                 }
                                 .onAppear {
@@ -940,21 +998,47 @@ struct BoardView: View {
         }
         .listStyle(.plain)
         .navigationTitle(board.title)
+#if os(iOS)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(.bar, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
+#endif
+        .hideRootTabBar()
         .toolbar {
-            ToolbarItemGroup {
-                Button {
-                    webAction = MeecoWebAction(title: "글쓰기", url: board.writeURL(category: viewModel.selectedCategory))
-                } label: {
-                    Image(systemName: "square.and.pencil")
-                }
+            ToolbarItem(placement: .primaryAction) {
+                Menu {
+                    Button {
+                        webAction = MeecoWebAction(title: "글쓰기", url: board.writeURL(category: viewModel.selectedCategory))
+                    } label: {
+                        Label("글쓰기", systemImage: "square.and.pencil")
+                    }
 
-                Button {
-                    Task { await viewModel.applyLatestPosts() }
+                    Button {
+                        Task { await viewModel.applyLatestPosts() }
+                    } label: {
+                        Label("새로고침", systemImage: "arrow.clockwise")
+                    }
+                    .disabled(viewModel.state == .loading)
+
+                    Button {
+                        webAction = MeecoWebAction(title: board.title, url: board.pageURL(1, category: viewModel.selectedCategory))
+                    } label: {
+                        Label("웹에서 열기", systemImage: "safari")
+                    }
                 } label: {
-                    Image(systemName: "arrow.clockwise")
+                    Image(systemName: "ellipsis.circle")
                 }
-                .disabled(viewModel.state == .loading)
+                .accessibilityLabel("더보기")
             }
+        }
+        .safeAreaInset(edge: .bottom) {
+            BoardBottomActionBar(
+                searchText: $searchText,
+                onSearch: submitSearch,
+                onCompose: {
+                    webAction = MeecoWebAction(title: "글쓰기", url: board.writeURL(category: viewModel.selectedCategory))
+                }
+            )
         }
         .sheet(item: $webAction) { action in
             WebActionView(action: action)
@@ -981,6 +1065,58 @@ struct BoardView: View {
                 }
             }
         }
+    }
+
+    private func submitSearch() {
+        guard !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        webAction = MeecoWebAction(
+            title: "검색",
+            url: board.searchURL(query: searchText, category: viewModel.selectedCategory)
+        )
+    }
+}
+
+struct BoardBottomActionBar: View {
+    @Binding var searchText: String
+    let onSearch: () -> Void
+    let onCompose: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundColor(.secondary)
+
+                TextField("검색", text: $searchText)
+                    .font(.body.weight(.semibold))
+                    .textInputAutocapitalization(.never)
+                    .disableAutocorrection(true)
+                    .submitLabel(.search)
+                    .onSubmit(onSearch)
+
+                Button(action: onSearch) {
+                    Image(systemName: "arrow.forward.circle.fill")
+                        .font(.title3)
+                }
+                .disabled(searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .accessibilityLabel("검색")
+            }
+            .padding(.horizontal, 14)
+            .frame(height: 50)
+            .boardLiquidGlass(cornerRadius: 25)
+
+            Button(action: onCompose) {
+                Image(systemName: "square.and.pencil")
+                    .font(.title3.weight(.semibold))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            .frame(width: 50, height: 50)
+            .boardLiquidGlassButton()
+            .accessibilityLabel("글쓰기")
+        }
+        .padding(.horizontal, 16)
+        .padding(.top, 8)
+        .padding(.bottom, 10)
     }
 }
 
@@ -1048,7 +1184,7 @@ struct CategoryTabBar: View {
             .padding(.horizontal)
             .padding(.vertical, 8)
         }
-        .background(Color.secondary.opacity(0.08))
+        .background(.bar)
     }
 
     private func categoryButton(title: String, category: MeecoBoardCategory?) -> some View {
@@ -1074,6 +1210,16 @@ struct PostRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
+                if post.isNotice || post.isHot {
+                    Text(post.isNotice ? "공지" : "핫글")
+                        .font(.caption2.weight(.bold))
+                        .foregroundColor(post.isNotice ? .accentColor : .pink)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background((post.isNotice ? Color.accentColor : Color.pink).opacity(0.12))
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                }
+
                 Text(post.title)
                     .font(.body)
                     .foregroundColor(.primary)
@@ -1502,12 +1648,60 @@ enum ImageMetadataReader {
 
 private extension View {
     @ViewBuilder
-    func hideTabBarWhileReading() -> some View {
+    func showRootTabBar() -> some View {
+        self.hideRootTabBar()
+    }
+
+    @ViewBuilder
+    func hideRootTabBar() -> some View {
 #if os(iOS)
         self.toolbar(.hidden, for: .tabBar)
 #else
         self
 #endif
+    }
+
+    @ViewBuilder
+    func boardLiquidGlass(cornerRadius: CGFloat) -> some View {
+#if os(iOS)
+        if #available(iOS 26.0, *) {
+            self.glassEffect(.regular.interactive(), in: .rect(cornerRadius: cornerRadius))
+        } else {
+            self
+                .background(.bar)
+                .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
+        }
+#else
+        self
+            .background(.bar)
+            .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
+#endif
+    }
+
+    @ViewBuilder
+    func boardLiquidGlassButton() -> some View {
+#if os(iOS)
+        if #available(iOS 26.0, *) {
+            self
+                .buttonStyle(.plain)
+                .glassEffect(.regular.interactive(), in: Circle())
+                .clipShape(Circle())
+        } else {
+            self
+                .buttonStyle(.bordered)
+                .background(.bar)
+                .clipShape(Circle())
+        }
+#else
+        self
+            .buttonStyle(.bordered)
+            .clipShape(Circle())
+#endif
+    }
+
+    @ViewBuilder
+    func hideTabBarWhileReading() -> some View {
+        self.hideRootTabBar()
     }
 }
 
@@ -2451,7 +2645,9 @@ struct MeecoHTMLParser {
         let isPromotedRow = rowHTML.localizedCaseInsensitiveContains("hot_text")
             || rowHTML.localizedCaseInsensitiveContains("notice_text")
         if isPromotedRow {
-            return false
+            guard let requiredCategoryTitle = requiredCategory?.title else { return false }
+            return rowCategoryTitle(rowHTML) == requiredCategoryTitle
+                || categoryLinkTitle(rowHTML: rowHTML, categoryID: requiredCategoryID) == requiredCategoryTitle
         }
 
         if rowHTML.localizedCaseInsensitiveContains("list_ctg"),
@@ -2472,6 +2668,14 @@ struct MeecoHTMLParser {
     private func rowCategoryTitle(_ rowHTML: String) -> String? {
         rowHTML.firstMatch(
             pattern: #"<span\b[^>]*class=[\"'][^\"']*list_ctg[^\"']*[\"'][^>]*>(.*?)</span>"#,
+            group: 1,
+            options: [.caseInsensitive, .dotMatchesLineSeparators]
+        )?.plainHTMLText
+    }
+
+    private func categoryLinkTitle(rowHTML: String, categoryID: String) -> String? {
+        rowHTML.firstMatch(
+            pattern: #"<a\b[^>]*href=[\"'][^\"']*/category/\#(categoryID)(?:[?/#][^\"']*)?[\"'][^>]*>(.*?)</a>"#,
             group: 1,
             options: [.caseInsensitive, .dotMatchesLineSeparators]
         )?.plainHTMLText
@@ -2696,7 +2900,7 @@ struct MeecoHTMLParser {
         }
 
         if rowHTML.localizedCaseInsensitiveContains("<td"),
-           let vote = cells.last(where: { $0.firstMatch(pattern: #"^\d+$"#) != nil }) {
+           let vote = cells.last(where: { $0.firstMatch(pattern: #"^(\d+)$"#) != nil }) {
             return Int(vote) ?? 0
         }
 
@@ -2705,7 +2909,7 @@ struct MeecoHTMLParser {
                 cell != nickname
                     && cell != date
                     && !cell.isPostDate
-                    && cell.firstMatch(pattern: #"^\d+$"#) != nil
+                    && cell.firstMatch(pattern: #"^(\d+)$"#) != nil
             }
 
         return trailingNumericCells.last.flatMap(Int.init) ?? 0

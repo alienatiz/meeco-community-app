@@ -457,6 +457,13 @@ final class meecoTests: XCTestCase {
         )
     }
 
+    func testBoardSearchURLPreservesSelectedCategory() throws {
+        XCTAssertEqual(
+            MeecoBoard.mini.searchURL(query: "  폴드  ", category: MeecoBoard.mini.categories[1]).absoluteString,
+            "https://meeco.kr/mini/category/36923546?search_target=title_content&search_keyword=%ED%8F%B4%EB%93%9C"
+        )
+    }
+
     func testParserFiltersMobilePostsBySelectedCategoryQuery() throws {
         let html = """
         <li>
@@ -539,6 +546,31 @@ final class meecoTests: XCTestCase {
         )
 
         XCTAssertEqual(posts.map(\.title), ["진짜 음향 게시물"])
+    }
+
+    func testParserKeepsPromotedRowsWithExplicitCategoryLink() throws {
+        let html = """
+        <tr>
+            <td class=\"num\">핫글</td>
+            <td class=\"category\"><a href=\"/mini/category/23941713\">미니</a></td>
+            <td class=\"title\"><a class=\"title_a\" href=\"/mini/41482700\">카테고리 핫글</a></td>
+            <td class=\"author\">작성자</td>
+            <td class=\"date\">11:14</td>
+            <td class=\"readed_count\">613</td>
+            <td class=\"voted_count\">10</td>
+        </tr>
+        """
+
+        let posts = MeecoHTMLParser().posts(
+            from: html,
+            baseURL: URL(string: "https://meeco.kr/mini/category/23941713")!,
+            allowedBoardPaths: ["mini"],
+            category: MeecoBoard.mini.categories[0]
+        )
+
+        XCTAssertEqual(posts.map(\.title), ["카테고리 핫글"])
+        XCTAssertEqual(posts.first?.upvoteCount, 10)
+        XCTAssertEqual(posts.first?.isHot, true)
     }
 
     func testParserAppliesCategoryLabelsAcrossTabbedBoards() throws {
