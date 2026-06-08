@@ -184,8 +184,11 @@ final class meecoTests: XCTestCase {
         let html = """
         <li>
             <a class=\"list_link\" href=\"/Gallery/41490030\" title=\"저녁 하늘 사진\"></a>
-            <img src=\"/files/attach/images/2026/06/08/gallery_sky.jpg\" alt=\"저녁 하늘\" />
-            <div class=\"list_info\"><span>사진가</span><span>26.06.08.</span></div>
+            <div class=\"ldb_thumb\" style=\"background-image: url(/files/thumbnails/030/900/414/750x520.crop.jpg?t=1780123345);\"></div>
+            <div class=\"list_info\">
+                <span>사진가</span><span>26.06.08.</span>
+                <span class=\"ldg_cmt\"><img src=\"/modules/board/m.skins/neon_mobile_board/images/icon_cmt.png\" alt=\"comment\" /> 4</span>
+            </div>
         </li>
         """
 
@@ -196,7 +199,7 @@ final class meecoTests: XCTestCase {
         )
 
         XCTAssertEqual(posts.first?.title, "저녁 하늘 사진")
-        XCTAssertEqual(posts.first?.thumbnailURL?.absoluteString, "https://meeco.kr/files/attach/images/2026/06/08/gallery_sky.jpg")
+        XCTAssertEqual(posts.first?.thumbnailURL?.absoluteString, "https://meeco.kr/files/thumbnails/030/900/414/750x520.crop.jpg?t=1780123345")
     }
 
     func testParserReadsMobileListLinkTitleAttribute() throws {

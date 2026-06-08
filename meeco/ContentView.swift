@@ -2828,7 +2828,7 @@ struct MeecoHTMLParser {
             upvoteCount: upvoteCount,
             isNotice: isNoticeRow(rowHTML),
             isHot: loweredRow.contains("핫글") || loweredRow.contains("hot"),
-            thumbnailURL: mediaItems(from: rowHTML, baseURL: baseURL).first { $0.kind == .image }?.url
+            thumbnailURL: thumbnailURL(from: rowHTML, baseURL: baseURL)
         )
     }
 
@@ -3502,6 +3502,23 @@ struct MeecoHTMLParser {
         return items
     }
 
+    private func thumbnailURL(from html: String, baseURL: URL) -> URL? {
+        let backgroundMatches = html.matches(
+            pattern: #"background-image\s*:\s*url\((['\"]?)(.*?)\1\)"#,
+            options: [.caseInsensitive, .dotMatchesLineSeparators]
+        )
+        for match in backgroundMatches {
+            guard match.count > 2,
+                  let url = URL(string: match[2].htmlDecoded, relativeTo: baseURL)?.absoluteURL,
+                  shouldUseImageURL(url) else {
+                continue
+            }
+            return url
+        }
+
+        return mediaItems(from: html, baseURL: baseURL).first { $0.kind == .image }?.url
+    }
+
     private func mediaSource(in attributes: String) -> String? {
         let candidates = [
             attributeValue(named: "src", in: attributes),
@@ -3530,7 +3547,8 @@ struct MeecoHTMLParser {
         return !path.contains("/profile_image/")
             && !path.contains("/addons/")
             && !path.contains("/images/new")
-            && !path.contains("/modules/document/tpl/icons/")
+            && !path.contains("/modules/")
+            && !path.contains("/layouts/")
     }
 
     private func shouldUseVideoURL(_ url: URL) -> Bool {
