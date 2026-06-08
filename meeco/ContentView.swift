@@ -2,20 +2,3314 @@
 //  ContentView.swift
 //  meeco
 //
-//  Created by 김병철 on 2023/07/08.
-//
 
+import Foundation
 import SwiftUI
+import AVKit
+import WebKit
+import ImageIO
 
 struct ContentView: View {
+    @State private var selectedTab: MeecoAppTab = .main
+
     var body: some View {
-        VStack {
-            Image(systemName: "globe")
-                .imageScale(.large)
-                .foregroundColor(.accentColor)
-            Text("Hello, world!")
+        TabView(selection: $selectedTab) {
+            ForEach(MeecoAppTab.allCases) { tab in
+                NavigationView {
+                    BoardDirectoryView(sections: tab.sections, title: tab.title)
+                }
+                .tabItem {
+                    Label(tab.title, systemImage: tab.systemImage)
+                }
+                .tag(tab)
+            }
         }
-        .padding()
+    }
+}
+
+enum MeecoAppTab: String, CaseIterable, Identifiable {
+    case main
+    case board
+    case settings
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .main: return "Main"
+        case .board: return "Board"
+        case .settings: return "Settings"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .main: return "house"
+        case .board: return "list.bullet.rectangle"
+        case .settings: return "gearshape"
+        }
+    }
+
+    var sections: [MeecoDirectorySection] {
+        switch self {
+        case .main:
+            return MeecoDirectorySection.mainSections
+        case .board:
+            return MeecoDirectorySection.boardSections
+        case .settings:
+            return MeecoDirectorySection.settingsSections
+        }
+    }
+}
+
+struct BoardDirectoryView: View {
+    let sections: [MeecoDirectorySection]
+    let title: String
+
+    var body: some View {
+        List {
+            ForEach(sections) { section in
+                Section(section.title) {
+                    ForEach(section.items) { item in
+                        switch item.destination {
+                        case .board(let board):
+                            NavigationLink(destination: BoardView(board: board)) {
+                                DirectoryItemRow(item: item)
+                            }
+                        case .web(let action):
+                            NavigationLink(destination: WebActionView(action: action)) {
+                                DirectoryItemRow(item: item)
+                            }
+                        case .account:
+                            NavigationLink(destination: AccountSettingsView()) {
+                                DirectoryItemRow(item: item)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .listStyle(.sidebar)
+        .navigationTitle(title)
+    }
+}
+
+struct DirectoryItemRow: View {
+    let item: MeecoDirectoryItem
+
+    var body: some View {
+        Label {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(item.title)
+                    .font(.body)
+                Text(item.description)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .lineLimit(2)
+            }
+        } icon: {
+            Image(systemName: item.systemImage)
+                .foregroundColor(.accentColor)
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+struct MeecoDirectorySection: Identifiable {
+    let id: String
+    let title: String
+    let items: [MeecoDirectoryItem]
+
+    static let mainSections: [MeecoDirectorySection] = [
+        MeecoDirectorySection(id: "main", title: "메인", items: [
+            .board(.all),
+            .board(.monthly),
+            .board(.makgora),
+            .web(id: "watchAds", title: "광고 보기", description: "미코 광고 보기", systemImage: "play.rectangle", url: URL(string: "https://meeco.kr/Support/38683562")!),
+            .web(id: "sendDonation", title: "도네 쏘기", description: "미코 후원 보내기", systemImage: "paperplane.fill", url: URL(string: "https://meeco.kr/Support/39348818")!),
+            .board(.balloon)
+        ])
+    ]
+
+    static let boardSections: [MeecoDirectorySection] = [
+        MeecoDirectorySection(id: "hot", title: "HOT 게시물", items: [.board(.hot)]),
+        MeecoDirectorySection(id: "it", title: "IT+", items: [.board(.news), .board(.mini), .board(.review), .board(.big), .board(.ai)]),
+        MeecoDirectorySection(id: "community", title: "자유+", items: [.board(.free), .board(.humor), .board(.gallery), .board(.anonymous)]),
+        MeecoDirectorySection(id: "price", title: "가격+", items: [.board(.price), .board(.purchase), .board(.market), .board(.enterprise)])
+    ]
+
+    static let settingsSections: [MeecoDirectorySection] = [
+        MeecoDirectorySection(id: "account", title: "계정", items: [
+            .account,
+            .web(id: "attendance", title: "출석부", description: "미코 출석 체크", systemImage: "calendar.badge.checkmark", url: URL(string: "https://meeco.kr/attendance")!),
+            .web(id: "sticker", title: "스티커 상점", description: "스티커 구매 및 관리", systemImage: "face.smiling", url: URL(string: "https://meeco.kr/sticker")!)
+        ]),
+        MeecoDirectorySection(id: "participation", title: "참여 / 운영", items: [
+            .board(.event),
+            .board(.bugUpdate),
+            .board(.notice)
+        ])
+    ]
+}
+
+struct MeecoDirectoryItem: Identifiable {
+    enum Destination {
+        case board(MeecoBoard)
+        case web(MeecoWebAction)
+        case account
+    }
+
+    let id: String
+    let title: String
+    let description: String
+    let systemImage: String
+    let destination: Destination
+
+    static func board(_ board: MeecoBoard) -> MeecoDirectoryItem {
+        MeecoDirectoryItem(
+            id: board.id,
+            title: board.title,
+            description: board.description,
+            systemImage: board.systemImage,
+            destination: .board(board)
+        )
+    }
+
+    static func web(id: String, title: String, description: String, systemImage: String, url: URL) -> MeecoDirectoryItem {
+        MeecoDirectoryItem(
+            id: id,
+            title: title,
+            description: description,
+            systemImage: systemImage,
+            destination: .web(MeecoWebAction(title: title, url: url))
+        )
+    }
+
+    static let account = MeecoDirectoryItem(
+        id: "login",
+        title: "로그인",
+        description: "미코 계정 로그인",
+        systemImage: "person.crop.circle",
+        destination: .account
+    )
+}
+
+struct MeecoBoard: Identifiable, Hashable {
+    let id: String
+    let title: String
+    let description: String
+    let systemImage: String
+    let url: URL
+    let allowedBoardPaths: Set<String>?
+    var categories: [MeecoBoardCategory] = []
+
+    static let articleBoardPaths: Set<String> = [
+        "Hot",
+        "All",
+        "Monthly",
+        "Makgora",
+        "Balloon",
+        "news",
+        "mini",
+        "Review",
+        "big",
+        "AI",
+        "free",
+        "humor",
+        "Gallery",
+        "anonymous",
+        "Price",
+        "Purchase",
+        "market",
+        "Enterprise",
+        "Event",
+        "BugUpdate",
+        "notice"
+    ]
+
+    static let all = MeecoBoard(
+        id: "all",
+        title: "모아보기",
+        description: "미코 전체 게시물 모아보기",
+        systemImage: "rectangle.grid.1x2.fill",
+        url: URL(string: "https://meeco.kr/All")!,
+        allowedBoardPaths: articleBoardPaths
+    )
+
+    static let monthly = MeecoBoard(
+        id: "monthly",
+        title: "월간 미코",
+        description: "월간 인기 게시물",
+        systemImage: "calendar",
+        url: URL(string: "https://meeco.kr/Monthly")!,
+        allowedBoardPaths: articleBoardPaths
+    )
+
+    static let makgora = MeecoBoard(
+        id: "makgora",
+        title: "막고라",
+        description: "막고라 게시판",
+        systemImage: "bolt.fill",
+        url: URL(string: "https://meeco.kr/Makgora")!,
+        allowedBoardPaths: ["Makgora"]
+    )
+
+    static let balloon = MeecoBoard(
+        id: "balloon",
+        title: "미코 도네",
+        description: "미코 후원 내역",
+        systemImage: "gift.fill",
+        url: URL(string: "https://meeco.kr/Balloon")!,
+        allowedBoardPaths: ["Balloon"]
+    )
+
+    static let hot = MeecoBoard(
+        id: "hot",
+        title: "HOT 게시물",
+        description: "미코 전체 인기 게시물",
+        systemImage: "flame.fill",
+        url: URL(string: "https://meeco.kr/Hot")!,
+        allowedBoardPaths: articleBoardPaths
+    )
+
+    static let news = MeecoBoard(
+        id: "news",
+        title: "IT 소식",
+        description: "최신 IT 뉴스와 회원 소식",
+        systemImage: "newspaper.fill",
+        url: URL(string: "https://meeco.kr/news")!,
+        allowedBoardPaths: ["news"]
+    )
+
+    static let mini = MeecoBoard(
+        id: "mini",
+        title: "미니기기 / 음향",
+        description: "스마트폰, PC, 카메라, 스피커와 음향기기",
+        systemImage: "iphone",
+        url: URL(string: "https://meeco.kr/mini")!,
+        allowedBoardPaths: ["mini"],
+        categories: [
+            MeecoBoardCategory(id: "mini", title: "미니", url: URL(string: "https://meeco.kr/mini/category/23941713")!),
+            MeecoBoardCategory(id: "audio", title: "음향", url: URL(string: "https://meeco.kr/mini/category/36923546")!),
+            MeecoBoardCategory(id: "notice", title: "공지", url: URL(string: "https://meeco.kr/mini/category/23941775")!)
+        ]
+    )
+
+    static let big = MeecoBoard(
+        id: "big",
+        title: "대형기기",
+        description: "TV, 모니터, 생활가전, 차량 이야기",
+        systemImage: "tv.fill",
+        url: URL(string: "https://meeco.kr/big")!,
+        allowedBoardPaths: ["big"],
+        categories: [
+            MeecoBoardCategory(id: "vehicle", title: "차량", url: URL(string: "https://meeco.kr/big/category/28110654")!),
+            MeecoBoardCategory(id: "tv", title: "TV", url: URL(string: "https://meeco.kr/big/category/28110676")!),
+            MeecoBoardCategory(id: "life", title: "생활", url: URL(string: "https://meeco.kr/big/category/28110645")!)
+        ]
+    )
+
+    static let ai = MeecoBoard(
+        id: "ai",
+        title: "AI / 로봇",
+        description: "AI, 로봇, 자동화 기술 이야기",
+        systemImage: "cpu.fill",
+        url: URL(string: "https://meeco.kr/AI")!,
+        allowedBoardPaths: ["AI"],
+        categories: [
+            MeecoBoardCategory(id: "ai", title: "AI", url: URL(string: "https://meeco.kr/AI/category/38624667")!),
+            MeecoBoardCategory(id: "robot", title: "로봇", url: URL(string: "https://meeco.kr/AI/category/38624668")!)
+        ]
+    )
+
+    static let free = MeecoBoard(
+        id: "free",
+        title: "자유 게시판",
+        description: "자유로운 주제의 커뮤니티 글",
+        systemImage: "bubble.left.and.bubble.right.fill",
+        url: URL(string: "https://meeco.kr/free")!,
+        allowedBoardPaths: ["free"]
+    )
+
+    static let humor = MeecoBoard(
+        id: "humor",
+        title: "유머 게시판",
+        description: "유머와 가벼운 읽을거리",
+        systemImage: "face.smiling.fill",
+        url: URL(string: "https://meeco.kr/humor")!,
+        allowedBoardPaths: ["humor"]
+    )
+
+    static let gallery = MeecoBoard(
+        id: "gallery",
+        title: "갤러리",
+        description: "사진과 이미지 중심 게시물",
+        systemImage: "photo.on.rectangle.angled",
+        url: URL(string: "https://meeco.kr/Gallery")!,
+        allowedBoardPaths: ["Gallery"]
+    )
+
+    static let anonymous = MeecoBoard(
+        id: "anonymous",
+        title: "익명 게시판",
+        description: "익명으로 대화하는 파일럿 게시판",
+        systemImage: "person.fill.questionmark",
+        url: URL(string: "https://meeco.kr/anonymous")!,
+        allowedBoardPaths: ["anonymous"]
+    )
+
+    static let review = MeecoBoard(
+        id: "review",
+        title: "리뷰 게시판",
+        description: "회원 사용기와 제품 리뷰",
+        systemImage: "star.bubble.fill",
+        url: URL(string: "https://meeco.kr/Review")!,
+        allowedBoardPaths: ["Review"],
+        categories: [
+            MeecoBoardCategory(id: "review", title: "리뷰", url: URL(string: "https://meeco.kr/Review/category/32500992")!),
+            MeecoBoardCategory(id: "lecture", title: "강의", url: URL(string: "https://meeco.kr/Review/category/37269169")!)
+        ]
+    )
+
+    static let price = MeecoBoard(
+        id: "price",
+        title: "특가 게시판",
+        description: "할인, 특가, 구매 정보",
+        systemImage: "tag.fill",
+        url: URL(string: "https://meeco.kr/Price")!,
+        allowedBoardPaths: ["Price"]
+    )
+
+    static let purchase = MeecoBoard(
+        id: "purchase",
+        title: "구매 할게요",
+        description: "구매 요청과 구입 희망 글",
+        systemImage: "cart.fill.badge.plus",
+        url: URL(string: "https://meeco.kr/Purchase")!,
+        allowedBoardPaths: ["Purchase"]
+    )
+
+    static let market = MeecoBoard(
+        id: "market",
+        title: "장터 게시판",
+        description: "회원 간 중고 거래 게시판",
+        systemImage: "bag.fill",
+        url: URL(string: "https://meeco.kr/market")!,
+        allowedBoardPaths: ["market"]
+    )
+
+    static let enterprise = MeecoBoard(
+        id: "enterprise",
+        title: "홍보 게시판",
+        description: "이벤트, 제휴, 홍보 게시물",
+        systemImage: "megaphone.fill",
+        url: URL(string: "https://meeco.kr/Enterprise")!,
+        allowedBoardPaths: ["Enterprise"]
+    )
+
+    static let event = MeecoBoard(
+        id: "event",
+        title: "이벤트 참여",
+        description: "이벤트 참여 게시판",
+        systemImage: "sparkles",
+        url: URL(string: "https://meeco.kr/Event")!,
+        allowedBoardPaths: ["Event"]
+    )
+
+    static let bugUpdate = MeecoBoard(
+        id: "bugUpdate",
+        title: "개선 목록",
+        description: "사이트 개선 및 운영 참여",
+        systemImage: "checklist",
+        url: URL(string: "https://meeco.kr/BugUpdate")!,
+        allowedBoardPaths: ["BugUpdate"]
+    )
+
+    static let notice = MeecoBoard(
+        id: "notice",
+        title: "공지사항",
+        description: "운영 공지와 사이트 안내",
+        systemImage: "megaphone.fill",
+        url: URL(string: "https://meeco.kr/notice")!,
+        allowedBoardPaths: ["notice"]
+    )
+
+    func pageURL(_ page: Int, category: MeecoBoardCategory? = nil) -> URL {
+        let baseURL = category?.url ?? url
+        guard page > 1,
+              var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else {
+            return baseURL
+        }
+
+        var queryItems = components.queryItems ?? []
+        queryItems.removeAll { $0.name == "page" }
+        queryItems.append(URLQueryItem(name: "page", value: String(page)))
+        components.queryItems = queryItems
+        return components.url ?? baseURL
+    }
+
+    func loginURL() -> URL {
+        actionURL(act: "dispMemberLoginForm", category: nil)
+    }
+
+    func writeURL(category: MeecoBoardCategory?) -> URL {
+        actionURL(act: "dispBoardWrite", category: category)
+    }
+
+    private func actionURL(act: String, category: MeecoBoardCategory?) -> URL {
+        var components = URLComponents(string: "https://meeco.kr/index.php")!
+        var queryItems = [
+            URLQueryItem(name: "mid", value: url.pathComponents.filter { $0 != "/" }.first ?? id),
+            URLQueryItem(name: "act", value: act)
+        ]
+
+        if let categoryID = category?.categoryID {
+            queryItems.append(URLQueryItem(name: "category", value: categoryID))
+        }
+
+        components.queryItems = queryItems
+        return components.url ?? url
+    }
+}
+
+struct MeecoBoardCategory: Identifiable, Hashable {
+    let id: String
+    let title: String
+    let url: URL
+
+    var categoryID: String? {
+        url.pathComponents.filter { $0 != "/" }.last
+    }
+}
+
+struct MeecoPost: Identifiable, Equatable {
+    let id: URL
+    let documentID: String
+    let title: String
+    let nickname: String
+    let date: String
+    let url: URL
+    let boardPath: String
+    let category: String?
+    let commentCount: Int?
+    let upvoteCount: Int
+    let isNotice: Bool
+    let isHot: Bool
+
+    var commentURL: URL {
+        var components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+        components?.fragment = "comment"
+        return components?.url ?? url
+    }
+}
+
+struct MeecoWebAction: Identifiable {
+    let id = UUID()
+    let title: String
+    let url: URL
+}
+
+struct MeecoLoginForm: Equatable {
+    let actionURL: URL
+    let method: String
+    let userIDField: String
+    let passwordField: String
+    let keepSignedField: String?
+    let keepSignedDefaultValue: String?
+    let validatorID: String?
+    let signUpURL: URL?
+    let findAccountURL: URL?
+}
+
+struct MeecoBoardSnapshot {
+    let posts: [MeecoPost]
+    let page: Int
+    let sourceFingerprint: Int
+    let fetchedAt: Date
+}
+
+struct MeecoPostDetail: Equatable {
+    let title: String
+    let nickname: String
+    let date: String
+    let body: String
+    let media: [MeecoMedia]
+    let comments: [MeecoComment]
+}
+
+struct MeecoMedia: Identifiable, Equatable {
+    enum Kind: Equatable {
+        case image
+        case video
+        case linkPreview
+    }
+
+    let id: URL
+    let url: URL
+    let altText: String
+    let kind: Kind
+}
+
+struct MeecoComment: Identifiable, Equatable {
+    let id = UUID()
+    let nickname: String
+    let date: String
+    let body: String
+    let media: [MeecoMedia]
+    let upvoteCount: Int
+    let replyDepth: Int
+    let isPostAuthor: Bool
+}
+
+@MainActor
+final class BoardViewModel: ObservableObject {
+    enum LoadingState: Equatable {
+        case idle
+        case loading
+        case loaded
+        case failed(String)
+    }
+
+    @Published private(set) var posts: [MeecoPost] = []
+    @Published private(set) var state: LoadingState = .idle
+    @Published private(set) var lastUpdatedAt: Date?
+    @Published private(set) var isLoadingNextPage = false
+    @Published private(set) var canLoadMore = true
+    @Published private(set) var selectedCategory: MeecoBoardCategory?
+    @Published private(set) var hasPendingLatestPosts = false
+    @Published private(set) var shouldPromptForUpdate = false
+    @Published private(set) var pendingLatestPostCount = 0
+    @Published private(set) var refreshStatusMessage: String?
+
+    private let board: MeecoBoard
+    private let service: MeecoService
+    private var sourceFingerprint: Int?
+    private var pageCache: [Int: MeecoBoardSnapshot] = [:]
+    private var pendingLatestSnapshot: MeecoBoardSnapshot?
+    private var nextPage = 2
+    private var requestGeneration = 0
+    private var lastNextPageRequestAt = Date.distantPast
+    private let minimumNextPageInterval: TimeInterval = 2.5
+
+    init(board: MeecoBoard, service: MeecoService = MeecoService()) {
+        self.board = board
+        self.service = service
+    }
+
+    func load(force: Bool = false) async {
+        guard force || state != .loading else { return }
+        requestGeneration += 1
+        let generation = requestGeneration
+        state = .loading
+        pageCache.removeAll()
+        pendingLatestSnapshot = nil
+        hasPendingLatestPosts = false
+        shouldPromptForUpdate = false
+        pendingLatestPostCount = 0
+        refreshStatusMessage = nil
+        nextPage = 2
+        canLoadMore = true
+        await fetchAndApply(page: 1, refreshLatest: false, generation: generation)
+    }
+
+    func markListMayBeStale() {
+        guard !posts.isEmpty else { return }
+        shouldPromptForUpdate = false
+    }
+
+    func checkForLatestPosts() async {
+        guard state != .loading else { return }
+        do {
+            let snapshot = try await service.fetchBoardSnapshot(for: board, page: 1, category: selectedCategory)
+            lastUpdatedAt = snapshot.fetchedAt
+            guard isDifferentLatest(snapshot) else {
+                applyMetadataRefresh(snapshot)
+                pendingLatestSnapshot = nil
+                hasPendingLatestPosts = false
+                shouldPromptForUpdate = false
+                pendingLatestPostCount = 0
+                return
+            }
+            let newCount = newPostCount(in: snapshot)
+            guard newCount > 0 else {
+                applyMetadataRefresh(snapshot)
+                pendingLatestSnapshot = nil
+                hasPendingLatestPosts = false
+                shouldPromptForUpdate = false
+                pendingLatestPostCount = 0
+                return
+            }
+
+            pendingLatestSnapshot = snapshot
+            hasPendingLatestPosts = true
+            shouldPromptForUpdate = true
+            pendingLatestPostCount = newCount
+        } catch {
+            if posts.isEmpty {
+                state = .failed(error.localizedDescription)
+            }
+        }
+    }
+
+    func applyLatestPosts() async {
+        guard state != .loading else { return }
+        if let pendingLatestSnapshot {
+            applyLatestSnapshotIfNeeded(pendingLatestSnapshot)
+            self.pendingLatestSnapshot = nil
+            return
+        }
+
+        do {
+            let snapshot = try await service.fetchBoardSnapshot(for: board, page: 1, category: selectedCategory)
+            applyLatestSnapshotIfNeeded(snapshot)
+        } catch {
+            if posts.isEmpty {
+                state = .failed(error.localizedDescription)
+            }
+        }
+    }
+
+    func clearRefreshStatusMessage(_ message: String?) {
+        guard refreshStatusMessage == message else { return }
+        refreshStatusMessage = nil
+    }
+
+    var topUpvotedPosts: [MeecoPost] {
+        Array(posts
+            .filter { $0.upvoteCount > 0 }
+            .sorted { lhs, rhs in
+                if lhs.upvoteCount == rhs.upvoteCount {
+                    return lhs.date > rhs.date
+                }
+                return lhs.upvoteCount > rhs.upvoteCount
+            }
+            .prefix(3))
+    }
+
+    func selectCategory(_ category: MeecoBoardCategory?) async {
+        guard selectedCategory != category else { return }
+        selectedCategory = category
+        posts = []
+        sourceFingerprint = nil
+        pendingLatestSnapshot = nil
+        hasPendingLatestPosts = false
+        shouldPromptForUpdate = false
+        pendingLatestPostCount = 0
+        refreshStatusMessage = nil
+        await load(force: true)
+    }
+
+    func loadNextPageIfNeeded(after post: MeecoPost) async {
+        guard canLoadMore,
+              !isLoadingNextPage,
+              post.id == posts.last?.id else {
+            return
+        }
+
+        let elapsed = Date().timeIntervalSince(lastNextPageRequestAt)
+        if elapsed < minimumNextPageInterval {
+            let delay = minimumNextPageInterval - elapsed
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+        }
+
+        guard canLoadMore, !isLoadingNextPage else { return }
+        isLoadingNextPage = true
+        lastNextPageRequestAt = Date()
+        defer { isLoadingNextPage = false }
+
+        let page = nextPage
+        do {
+            let snapshot: MeecoBoardSnapshot
+            if let cachedSnapshot = pageCache[page] {
+                snapshot = cachedSnapshot
+            } else {
+                snapshot = try await service.fetchBoardSnapshot(for: board, page: page, category: selectedCategory)
+                pageCache[page] = snapshot
+            }
+
+            let originalCount = posts.count
+            posts = merged(posts + snapshot.posts)
+            lastUpdatedAt = snapshot.fetchedAt
+
+            if snapshot.posts.isEmpty || posts.count == originalCount {
+                canLoadMore = false
+            } else {
+                nextPage += 1
+            }
+        } catch {
+            canLoadMore = false
+        }
+    }
+
+    private func fetchAndApply(page: Int, refreshLatest: Bool, generation: Int? = nil) async {
+        do {
+            let snapshot = try await service.fetchBoardSnapshot(for: board, page: page, category: selectedCategory)
+            if let generation, generation != requestGeneration {
+                return
+            }
+            pageCache[page] = snapshot
+            if page == 1 {
+                applyPageOneSnapshot(snapshot)
+            } else if refreshLatest || snapshot.sourceFingerprint != sourceFingerprint {
+                posts = merged(posts + snapshot.posts)
+                sourceFingerprint = snapshot.sourceFingerprint
+            }
+            lastUpdatedAt = snapshot.fetchedAt
+            state = .loaded
+        } catch {
+            if posts.isEmpty {
+                state = .failed(error.localizedDescription)
+            }
+        }
+    }
+
+    private func merged(_ posts: [MeecoPost]) -> [MeecoPost] {
+        var seen = Set<URL>()
+        return posts.filter { seen.insert($0.url).inserted }
+    }
+
+    private func applyPageOneSnapshot(_ snapshot: MeecoBoardSnapshot) {
+        pageCache[1] = snapshot
+        posts = merged(snapshot.posts + pageCache.keys.sorted().filter { $0 > 1 }.flatMap { pageCache[$0]?.posts ?? [] })
+        sourceFingerprint = snapshot.sourceFingerprint
+        lastUpdatedAt = snapshot.fetchedAt
+        hasPendingLatestPosts = false
+        shouldPromptForUpdate = false
+        pendingLatestPostCount = 0
+    }
+
+    private func isDifferentLatest(_ snapshot: MeecoBoardSnapshot) -> Bool {
+        let currentIDs = pageCache[1]?.posts.map(\.id) ?? Array(posts.prefix(snapshot.posts.count)).map(\.id)
+        return currentIDs != snapshot.posts.map(\.id)
+    }
+
+    private func applyLatestSnapshotIfNeeded(_ snapshot: MeecoBoardSnapshot) {
+        let newCount = newPostCount(in: snapshot)
+        pendingLatestSnapshot = nil
+        hasPendingLatestPosts = false
+        shouldPromptForUpdate = false
+        pendingLatestPostCount = 0
+
+        guard newCount > 0 else {
+            applyMetadataRefresh(snapshot)
+            lastUpdatedAt = snapshot.fetchedAt
+            refreshStatusMessage = "새 게시물이 없습니다."
+            state = .loaded
+            return
+        }
+
+        applyPageOneSnapshot(snapshot)
+        refreshStatusMessage = "새 게시물 \(newCount)개를 불러왔습니다."
+        state = .loaded
+    }
+
+    private func newPostCount(in snapshot: MeecoBoardSnapshot) -> Int {
+        guard let currentFirstID = pageCache[1]?.posts.first?.id ?? posts.first?.id,
+              let currentFirstIndex = snapshot.posts.firstIndex(where: { $0.id == currentFirstID }) else {
+            return 0
+        }
+
+        let currentIDs = Set(posts.map(\.id))
+        return snapshot.posts
+            .prefix(currentFirstIndex)
+            .filter { !currentIDs.contains($0.id) }
+            .count
+    }
+
+    private func applyMetadataRefresh(_ snapshot: MeecoBoardSnapshot) {
+        guard !posts.isEmpty else {
+            applyPageOneSnapshot(snapshot)
+            return
+        }
+
+        let existingIDs = Set(posts.map(\.id))
+        guard snapshot.posts.contains(where: { existingIDs.contains($0.id) }) else { return }
+
+        let replacements = Dictionary(uniqueKeysWithValues: snapshot.posts.map { ($0.id, $0) })
+        posts = posts.map { replacements[$0.id] ?? $0 }
+        if let cachedPageOne = pageCache[1] {
+            pageCache[1] = MeecoBoardSnapshot(
+                posts: cachedPageOne.posts.map { replacements[$0.id] ?? $0 },
+                page: cachedPageOne.page,
+                sourceFingerprint: snapshot.sourceFingerprint,
+                fetchedAt: snapshot.fetchedAt
+            )
+        } else {
+            pageCache[1] = snapshot
+        }
+        sourceFingerprint = snapshot.sourceFingerprint
+    }
+}
+
+struct BoardView: View {
+    let board: MeecoBoard
+
+    @Environment(\.scenePhase) private var scenePhase
+    @StateObject private var viewModel: BoardViewModel
+    @State private var webAction: MeecoWebAction?
+    private let refreshTimer = Timer.publish(every: 120, on: .main, in: .common).autoconnect()
+
+    init(board: MeecoBoard) {
+        self.board = board
+        _viewModel = StateObject(wrappedValue: BoardViewModel(board: board))
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if !board.categories.isEmpty {
+                CategoryTabBar(
+                    categories: board.categories,
+                    selectedCategory: viewModel.selectedCategory
+                ) { category in
+                    Task { await viewModel.selectCategory(category) }
+                }
+            }
+
+            if viewModel.shouldPromptForUpdate {
+                LatestPostsPrompt(newPostCount: viewModel.pendingLatestPostCount) {
+                    Task { await viewModel.applyLatestPosts() }
+                }
+            }
+
+            if let refreshStatusMessage = viewModel.refreshStatusMessage {
+                RefreshStatusBanner(message: refreshStatusMessage)
+            }
+
+            Group {
+                if viewModel.posts.isEmpty {
+                    switch viewModel.state {
+                    case .failed(let message):
+                        VStack(spacing: 12) {
+                            Image(systemName: "wifi.exclamationmark")
+                                .font(.largeTitle)
+                                .foregroundColor(.secondary)
+                            Text("게시물을 불러오지 못했습니다")
+                                .font(.headline)
+                            Text(message)
+                                .font(.footnote)
+                                .foregroundColor(.secondary)
+                                .multilineTextAlignment(.center)
+                            Button("다시 시도") {
+                                Task { await viewModel.load() }
+                            }
+                            .buttonStyle(.borderedProminent)
+                        }
+                        .padding()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    default:
+                        ProgressView()
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    }
+                } else {
+                    List {
+                        if !viewModel.topUpvotedPosts.isEmpty {
+                            Section("추천 상위 게시물") {
+                                ForEach(Array(viewModel.topUpvotedPosts.enumerated()), id: \.element.id) { index, post in
+                                    NavigationLink(destination: PostDetailView(post: post)) {
+                                        TopUpvotedPostRow(rank: index + 1, post: post)
+                                    }
+                                }
+                            }
+                        }
+
+                        Section {
+                            ForEach(viewModel.posts) { post in
+                                NavigationLink(destination: PostDetailView(post: post)) {
+                                    PostRow(post: post)
+                                }
+                                .onAppear {
+                                    Task { await viewModel.loadNextPageIfNeeded(after: post) }
+                                }
+                            }
+                        }
+                    }
+                    .refreshable {
+                        await viewModel.applyLatestPosts()
+                    }
+
+                    if viewModel.isLoadingNextPage {
+                        HStack {
+                            Spacer()
+                            ProgressView()
+                            Spacer()
+                        }
+                        .padding(.vertical, 8)
+                    }
+                }
+            }
+        }
+        .listStyle(.plain)
+        .navigationTitle(board.title)
+        .toolbar {
+            ToolbarItemGroup {
+                Button {
+                    webAction = MeecoWebAction(title: "글쓰기", url: board.writeURL(category: viewModel.selectedCategory))
+                } label: {
+                    Image(systemName: "square.and.pencil")
+                }
+
+                Button {
+                    Task { await viewModel.applyLatestPosts() }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .disabled(viewModel.state == .loading)
+            }
+        }
+        .sheet(item: $webAction) { action in
+            WebActionView(action: action)
+        }
+        .task {
+            await viewModel.load()
+        }
+        .onReceive(refreshTimer) { _ in
+            Task { await viewModel.checkForLatestPosts() }
+        }
+        .onChange(of: scenePhase) { phase in
+            if phase == .active {
+                Task { await viewModel.checkForLatestPosts() }
+            } else if phase == .inactive || phase == .background {
+                viewModel.markListMayBeStale()
+            }
+        }
+        .onChange(of: viewModel.refreshStatusMessage) { message in
+            guard let message else { return }
+            Task {
+                try? await Task.sleep(nanoseconds: 2_500_000_000)
+                await MainActor.run {
+                    viewModel.clearRefreshStatusMessage(message)
+                }
+            }
+        }
+    }
+}
+
+struct LatestPostsPrompt: View {
+    let newPostCount: Int
+    let onUpdate: () -> Void
+
+    var body: some View {
+        Button(action: onUpdate) {
+            HStack(spacing: 8) {
+                Image(systemName: "arrow.up.circle.fill")
+                Text(promptText)
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Text("업데이트")
+                    .font(.caption.weight(.semibold))
+            }
+            .foregroundColor(.accentColor)
+            .padding(.horizontal)
+            .padding(.vertical, 10)
+            .background(Color.accentColor.opacity(0.12))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var promptText: String {
+        if newPostCount > 0 {
+            return "새 게시물 \(newPostCount)개가 있습니다. 위로 당겨 업데이트하세요."
+        }
+
+        return "게시물 목록이 최신이 아닐 수 있습니다. 위로 당겨 업데이트하세요."
+    }
+}
+
+struct RefreshStatusBanner: View {
+    let message: String
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "info.circle")
+            Text(message)
+                .font(.footnote.weight(.semibold))
+            Spacer()
+        }
+        .foregroundColor(.secondary)
+        .padding(.horizontal)
+        .padding(.vertical, 8)
+        .background(Color.secondary.opacity(0.08))
+    }
+}
+
+struct CategoryTabBar: View {
+    let categories: [MeecoBoardCategory]
+    let selectedCategory: MeecoBoardCategory?
+    let onSelect: (MeecoBoardCategory?) -> Void
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                categoryButton(title: "전체", category: nil)
+                ForEach(categories) { category in
+                    categoryButton(title: category.title, category: category)
+                }
+            }
+            .padding(.horizontal)
+            .padding(.vertical, 8)
+        }
+        .background(Color.secondary.opacity(0.08))
+    }
+
+    private func categoryButton(title: String, category: MeecoBoardCategory?) -> some View {
+        let isSelected = selectedCategory == category
+        return Button {
+            onSelect(category)
+        } label: {
+            Text(title)
+                .font(.subheadline.weight(isSelected ? .semibold : .regular))
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .background(isSelected ? Color.accentColor.opacity(0.16) : Color.clear)
+                .foregroundColor(isSelected ? .accentColor : .primary)
+                .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+struct PostRow: View {
+    let post: MeecoPost
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(post.title)
+                    .font(.body)
+                    .foregroundColor(.primary)
+                    .lineLimit(2)
+                Spacer(minLength: 8)
+                if let commentCount = post.commentCount, commentCount > 0 {
+                    Label("\(commentCount)", systemImage: "text.bubble")
+                        .font(.caption)
+                        .foregroundColor(.accentColor)
+                        .labelStyle(.titleAndIcon)
+                }
+            }
+
+            HStack(spacing: 8) {
+                Text([post.nickname, post.date].filter { !$0.isEmpty }.joined(separator: " "))
+                    .lineLimit(1)
+                if post.upvoteCount > 0 {
+                    Label("\(post.upvoteCount)", systemImage: "heart.fill")
+                        .labelStyle(.titleAndIcon)
+                        .foregroundColor(.pink)
+                }
+            }
+            .font(.caption)
+            .foregroundColor(.secondary)
+        }
+        .padding(.vertical, 6)
+    }
+}
+
+struct TopUpvotedPostRow: View {
+    let rank: Int
+    let post: MeecoPost
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Text("\(rank)")
+                .font(.caption.weight(.bold))
+                .foregroundColor(.white)
+                .frame(width: 24, height: 24)
+                .background(Color.accentColor)
+                .clipShape(Circle())
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(post.title)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                Text([post.nickname, post.date].filter { !$0.isEmpty }.joined(separator: " "))
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 8)
+
+            Label("\(post.upvoteCount)", systemImage: "heart.fill")
+                .font(.caption.weight(.semibold))
+                .foregroundColor(.pink)
+                .labelStyle(.titleAndIcon)
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+struct MediaStack: View {
+    let media: [MeecoMedia]
+    var onImageTap: (MeecoMedia) -> Void = { _ in }
+
+    var body: some View {
+        if !media.isEmpty {
+            VStack(spacing: 10) {
+                ForEach(media) { item in
+                    mediaView(item)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func mediaView(_ item: MeecoMedia) -> some View {
+        switch item.kind {
+        case .image:
+            Button {
+                onImageTap(item)
+            } label: {
+                AsyncImage(url: item.url) { phase in
+                    switch phase {
+                    case .empty:
+                        ProgressView()
+                            .frame(maxWidth: .infinity, minHeight: 160)
+                    case .success(let image):
+                        hdrImage(image)
+                    case .failure:
+                        Label("이미지를 불러오지 못했습니다", systemImage: "photo")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .frame(maxWidth: .infinity, minHeight: 80)
+                    @unknown default:
+                        EmptyView()
+                    }
+                }
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(item.altText.isEmpty ? "첨부 이미지" : item.altText)
+        case .video:
+            VideoPlayer(player: AVPlayer(url: item.url))
+                .frame(minHeight: 220)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+        case .linkPreview:
+            Link(destination: item.url) {
+                LinkPreviewCard(media: item)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    @ViewBuilder
+    private func hdrImage(_ image: Image) -> some View {
+        let fittedImage = image
+            .resizable()
+            .scaledToFit()
+
+        if #available(iOS 17.0, macOS 14.0, *) {
+            fittedImage
+                .allowedDynamicRange(.high)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+        } else {
+            fittedImage
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+        }
+    }
+}
+
+struct LinkPreviewCard: View {
+    let media: MeecoMedia
+
+    var body: some View {
+        HStack(spacing: 12) {
+            if let thumbnailURL = media.url.youtubeThumbnailURL {
+                AsyncImage(url: thumbnailURL) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .scaledToFill()
+                    default:
+                        Image(systemName: media.url.previewSystemImage)
+                            .font(.title2)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                .frame(width: 96, height: 64)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+            } else {
+                Image(systemName: media.url.previewSystemImage)
+                    .font(.title2)
+                    .foregroundColor(.secondary)
+                    .frame(width: 44)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(media.altText.nonEmpty ?? media.url.previewTitle)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundColor(.primary)
+                    .lineLimit(2)
+                Text(media.url.host ?? media.url.absoluteString)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(10)
+        .background(Color.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+struct OriginalImageViewer: View {
+    let media: MeecoMedia
+    let onDismiss: () -> Void
+
+    @State private var dragOffset: CGSize = .zero
+    @State private var exifRows: [ImageMetadataRow] = []
+    @State private var originalImageFileURL: URL?
+    @State private var isLoadingEXIF = false
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            Color.black
+                .ignoresSafeArea()
+
+            AsyncImage(url: media.url) { phase in
+                switch phase {
+                case .empty:
+                    ProgressView()
+                        .tint(.white)
+                case .success(let image):
+                    originalImage(image)
+                case .failure:
+                    VStack(spacing: 10) {
+                        Image(systemName: "photo")
+                            .font(.largeTitle)
+                        Text("원본 이미지를 불러오지 못했습니다")
+                            .font(.body)
+                    }
+                    .foregroundColor(.white.opacity(0.8))
+                @unknown default:
+                    EmptyView()
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(.bottom, exifRows.isEmpty ? 0 : 142)
+            .offset(y: max(0, dragOffset.height))
+            .gesture(
+                DragGesture(minimumDistance: 12)
+                    .onChanged { value in
+                        dragOffset = value.translation
+                    }
+                    .onEnded { value in
+                        if value.translation.height > 90 || value.predictedEndTranslation.height > 160 {
+                            onDismiss()
+                        } else {
+                            withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
+                                dragOffset = .zero
+                            }
+                        }
+                    }
+            )
+
+            VStack {
+                Spacer()
+                ImageMetadataOverlay(rows: exifRows, isLoading: isLoadingEXIF)
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 20)
+
+            HStack(spacing: 10) {
+                if let originalImageFileURL {
+                    ShareLink(item: originalImageFileURL) {
+                        Image(systemName: "square.and.arrow.down")
+                            .font(.headline.weight(.bold))
+                            .foregroundColor(.white)
+                            .frame(width: 42, height: 42)
+                            .background(Color.white.opacity(0.16))
+                            .clipShape(Circle())
+                    }
+                    .accessibilityLabel("사진 저장")
+                }
+
+                Button(action: onDismiss) {
+                    Image(systemName: "xmark")
+                        .font(.headline.weight(.bold))
+                        .foregroundColor(.white)
+                        .frame(width: 42, height: 42)
+                        .background(Color.white.opacity(0.16))
+                        .clipShape(Circle())
+                }
+                .accessibilityLabel("닫기")
+            }
+            .padding(.top, 18)
+            .padding(.trailing, 18)
+        }
+        .task(id: media.url) {
+            await loadEXIF()
+        }
+    }
+
+    @ViewBuilder
+    private func originalImage(_ image: Image) -> some View {
+        let fittedImage = image
+            .resizable()
+            .scaledToFit()
+            .padding(12)
+
+        if #available(iOS 17.0, macOS 14.0, *) {
+            fittedImage.allowedDynamicRange(.high)
+        } else {
+            fittedImage
+        }
+    }
+
+    private func loadEXIF() async {
+        isLoadingEXIF = true
+        defer { isLoadingEXIF = false }
+
+        do {
+            let (data, _) = try await URLSession.shared.data(from: media.url)
+            exifRows = ImageMetadataReader.rows(from: data)
+            originalImageFileURL = try temporaryImageFileURL(for: data)
+        } catch {
+            exifRows = []
+            originalImageFileURL = nil
+        }
+    }
+
+    private func temporaryImageFileURL(for data: Data) throws -> URL {
+        let fileExtension = media.url.pathExtension.nonEmpty ?? "jpg"
+        let fileURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("meeco-original-\(media.id.hashValue)")
+            .appendingPathExtension(fileExtension)
+        try data.write(to: fileURL, options: .atomic)
+        return fileURL
+    }
+}
+
+struct ImageMetadataRow: Identifiable, Equatable {
+    let id: String
+    let label: String
+    let value: String
+}
+
+struct ImageMetadataOverlay: View {
+    let rows: [ImageMetadataRow]
+    let isLoading: Bool
+
+    var body: some View {
+        if isLoading || !rows.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    Image(systemName: "camera.metering.center.weighted")
+                    Text("EXIF")
+                        .font(.caption.weight(.bold))
+                    if isLoading {
+                        ProgressView()
+                            .scaleEffect(0.7)
+                            .tint(.white)
+                    }
+                    Spacer()
+                }
+
+                ForEach(rows) { row in
+                    HStack(alignment: .firstTextBaseline, spacing: 10) {
+                        Text(row.label)
+                            .foregroundColor(.white.opacity(0.62))
+                            .frame(width: 82, alignment: .leading)
+                        Text(row.value)
+                            .foregroundColor(.white)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                    }
+                    .font(.caption)
+                }
+            }
+            .padding(12)
+            .background(.ultraThinMaterial)
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(Color.white.opacity(0.18), lineWidth: 1)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .foregroundColor(.white)
+        }
+    }
+}
+
+enum ImageMetadataReader {
+    static func rows(from data: Data) -> [ImageMetadataRow] {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [String: Any] else {
+            return []
+        }
+
+        let tiff = properties[kCGImagePropertyTIFFDictionary as String] as? [String: Any] ?? [:]
+        let exif = properties[kCGImagePropertyExifDictionary as String] as? [String: Any] ?? [:]
+        var rows: [ImageMetadataRow] = []
+        append("camera", "Camera", [string(tiff[kCGImagePropertyTIFFMake as String]), string(tiff[kCGImagePropertyTIFFModel as String])].compactMap { $0 }.joined(separator: " "), to: &rows)
+        append("lens", "Lens", string(exif[kCGImagePropertyExifLensModel as String]), to: &rows)
+        append("date", "Date", string(exif[kCGImagePropertyExifDateTimeOriginal as String]) ?? string(tiff[kCGImagePropertyTIFFDateTime as String]), to: &rows)
+        append("focal", "Focal", rational(exif[kCGImagePropertyExifFocalLength as String]).map { "\($0) mm" }, to: &rows)
+        append("aperture", "Aperture", rational(exif[kCGImagePropertyExifFNumber as String]).map { "f/\($0)" }, to: &rows)
+        append("exposure", "Shutter", exposureTime(exif[kCGImagePropertyExifExposureTime as String]), to: &rows)
+        append("iso", "ISO", intList(exif[kCGImagePropertyExifISOSpeedRatings as String]), to: &rows)
+        append("size", "Size", imageSize(properties), to: &rows)
+        return rows
+    }
+
+    private static func append(_ id: String, _ label: String, _ value: String?, to rows: inout [ImageMetadataRow]) {
+        guard let value, !value.isEmpty else { return }
+        rows.append(ImageMetadataRow(id: id, label: label, value: value))
+    }
+
+    private static func string(_ value: Any?) -> String? {
+        if let string = value as? String {
+            return string.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty
+        }
+        if let number = value as? NSNumber {
+            return number.stringValue
+        }
+        return nil
+    }
+
+    private static func rational(_ value: Any?) -> String? {
+        guard let number = value as? NSNumber else { return nil }
+        let doubleValue = number.doubleValue
+        guard doubleValue > 0 else { return nil }
+        return String(format: doubleValue >= 10 ? "%.0f" : "%.1f", doubleValue)
+    }
+
+    private static func exposureTime(_ value: Any?) -> String? {
+        guard let number = value as? NSNumber else { return nil }
+        let seconds = number.doubleValue
+        guard seconds > 0 else { return nil }
+        if seconds < 1 {
+            return "1/\(Int(round(1 / seconds))) s"
+        }
+        return String(format: "%.1f s", seconds)
+    }
+
+    private static func intList(_ value: Any?) -> String? {
+        if let array = value as? [Any] {
+            return array.compactMap { string($0) }.joined(separator: ", ").nonEmpty
+        }
+        return string(value)
+    }
+
+    private static func imageSize(_ properties: [String: Any]) -> String? {
+        guard let width = properties[kCGImagePropertyPixelWidth as String] as? NSNumber,
+              let height = properties[kCGImagePropertyPixelHeight as String] as? NSNumber else {
+            return nil
+        }
+        return "\(width.intValue) x \(height.intValue)"
+    }
+
+}
+
+private extension View {
+    @ViewBuilder
+    func hideTabBarWhileReading() -> some View {
+#if os(iOS)
+        self.toolbar(.hidden, for: .tabBar)
+#else
+        self
+#endif
+    }
+}
+
+@MainActor
+final class PostDetailViewModel: ObservableObject {
+    enum LoadingState: Equatable {
+        case idle
+        case loading
+        case loaded
+        case failed(String)
+    }
+
+    @Published private(set) var detail: MeecoPostDetail?
+    @Published private(set) var state: LoadingState = .idle
+
+    private let post: MeecoPost
+    private let service: MeecoService
+
+    init(post: MeecoPost, service: MeecoService = MeecoService()) {
+        self.post = post
+        self.service = service
+    }
+
+    func load() async {
+        guard state != .loading else { return }
+        state = .loading
+        do {
+            detail = try await service.fetchPostDetail(for: post)
+            state = .loaded
+        } catch is CancellationError {
+            state = detail == nil ? .idle : .loaded
+        } catch {
+            state = .failed(error.localizedDescription)
+        }
+    }
+}
+
+struct PostDetailView: View {
+    let post: MeecoPost
+
+    @StateObject private var viewModel: PostDetailViewModel
+    @State private var webAction: MeecoWebAction?
+    @State private var selectedComment: MeecoComment?
+    @State private var selectedImage: MeecoMedia?
+
+    init(post: MeecoPost) {
+        self.post = post
+        _viewModel = StateObject(wrappedValue: PostDetailViewModel(post: post))
+    }
+
+    var body: some View {
+        Group {
+            if let detail = viewModel.detail {
+                detailContent(detail)
+            } else {
+                switch viewModel.state {
+                case .idle, .loading:
+                    ProgressView()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                case .failed(let message):
+                    fallbackWebContent(message: message)
+                default:
+                    EmptyView()
+                }
+            }
+        }
+        .navigationTitle("")
+        .safeAreaInset(edge: .bottom) {
+            PostCommentActionBar {
+                webAction = MeecoWebAction(title: "댓글 쓰기", url: post.commentURL)
+            }
+        }
+        .sheet(item: $webAction) { action in
+            WebActionView(action: action)
+        }
+        .fullScreenCover(item: $selectedImage) { media in
+            OriginalImageViewer(media: media) {
+                selectedImage = nil
+            }
+        }
+        .confirmationDialog(
+            "댓글 작업",
+            isPresented: Binding(
+                get: { selectedComment != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        selectedComment = nil
+                    }
+                }
+            ),
+            presenting: selectedComment
+        ) { comment in
+            Button {
+                webAction = MeecoWebAction(title: "댓글 추천", url: post.commentURL)
+            } label: {
+                Label("추천하기", systemImage: "heart")
+            }
+
+            Button {
+                webAction = MeecoWebAction(title: "답글 쓰기", url: post.commentURL)
+            } label: {
+                Label("답글 쓰기", systemImage: "arrowshape.turn.up.left")
+            }
+        } message: { comment in
+            Text([comment.nickname, comment.date].filter { !$0.isEmpty }.joined(separator: " "))
+        }
+        .task {
+            await viewModel.load()
+        }
+        .refreshable {
+            await viewModel.load()
+        }
+        .hideTabBarWhileReading()
+    }
+
+    private func fallbackWebContent(message: String) -> some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                Image(systemName: "exclamationmark.triangle")
+                    .foregroundColor(.secondary)
+                Text(message)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .lineLimit(2)
+                Spacer()
+                Button("다시 시도") {
+                    Task { await viewModel.load() }
+                }
+                .buttonStyle(.bordered)
+            }
+            .padding()
+
+            WebArticleView(url: post.url)
+        }
+    }
+
+    private func detailContent(_ detail: MeecoPostDetail) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(detail.title)
+                        .font(.title2.weight(.bold))
+                    HStack {
+                        Text(detail.nickname)
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        Text(detail.date)
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
+                }
+
+                Text(detail.body)
+                    .font(.body)
+                    .lineSpacing(5)
+                    .textSelection(.enabled)
+
+                MediaStack(media: detail.media) { media in
+                    selectedImage = media
+                }
+
+                if !detail.comments.isEmpty {
+                    CommentsHeader(count: detail.comments.count)
+                    CommentThreadList(
+                        comments: detail.comments,
+                        onImageTap: { media in selectedImage = media }
+                    ) { comment in
+                        selectedComment = comment
+                    }
+                }
+            }
+            .padding()
+            .padding(.bottom, 76)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+
+struct PostCommentActionBar: View {
+    let onWriteComment: () -> Void
+
+    var body: some View {
+        HStack {
+            Spacer()
+            Button(action: onWriteComment) {
+                Image(systemName: "text.bubble.fill")
+                    .font(.title3.weight(.semibold))
+                    .foregroundColor(.white)
+                    .frame(width: 52, height: 52)
+                    .background(Color.accentColor)
+                    .clipShape(Circle())
+                    .shadow(color: .black.opacity(0.18), radius: 12, y: 4)
+            }
+            .accessibilityLabel("댓글 쓰기")
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 10)
+        .background(.ultraThinMaterial)
+    }
+}
+
+struct CommentsHeader: View {
+    let count: Int
+
+    var body: some View {
+        HStack {
+            Text("댓글")
+                .font(.headline)
+            Text("\(count)")
+                .font(.subheadline.weight(.semibold))
+                .foregroundColor(.secondary)
+            Spacer()
+        }
+        .padding(.top, 8)
+        .padding(.bottom, 2)
+    }
+}
+
+struct CommentCard: View {
+    let comment: MeecoComment
+    let onImageTap: (MeecoMedia) -> Void
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                HStack(spacing: 6) {
+                    Text(comment.nickname.nonEmpty ?? "익명")
+                        .font(.caption.weight(.semibold))
+                    if comment.isPostAuthor {
+                        Text("작성자")
+                            .font(.caption2.weight(.bold))
+                            .foregroundColor(authorBadgeForeground)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(authorBadgeBackground)
+                            .clipShape(Capsule())
+                    }
+                }
+                Spacer(minLength: 8)
+                Text(comment.date)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            Text(comment.body)
+                .font(.body)
+                .foregroundColor(.primary)
+                .textSelection(.enabled)
+
+            MediaStack(media: comment.media, onImageTap: onImageTap)
+
+            if comment.upvoteCount > 0 {
+                Label("\(comment.upvoteCount)", systemImage: "heart.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundColor(.pink)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(cardBackground)
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(cardStroke, lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    private var cardBackground: Color {
+        if comment.isPostAuthor {
+            return colorScheme == .dark ? Color.orange.opacity(0.20) : Color.orange.opacity(0.12)
+        }
+
+        if colorScheme == .dark {
+            return comment.replyDepth > 0 ? Color.white.opacity(0.085) : Color.white.opacity(0.055)
+        }
+
+        return comment.replyDepth > 0 ? Color.accentColor.opacity(0.075) : Color.accentColor.opacity(0.045)
+    }
+
+    private var cardStroke: Color {
+        if comment.isPostAuthor {
+            return colorScheme == .dark ? Color.orange.opacity(0.50) : Color.orange.opacity(0.34)
+        }
+
+        if colorScheme == .dark {
+            return comment.replyDepth > 0 ? Color.white.opacity(0.24) : Color.white.opacity(0.14)
+        }
+
+        return comment.replyDepth > 0 ? Color.accentColor.opacity(0.22) : Color.accentColor.opacity(0.12)
+    }
+
+    private var authorBadgeForeground: Color {
+        colorScheme == .dark ? .black : .white
+    }
+
+    private var authorBadgeBackground: Color {
+        colorScheme == .dark ? Color.orange.opacity(0.95) : Color.orange
+    }
+}
+
+struct CommentThreadList: View {
+    let comments: [MeecoComment]
+    let onImageTap: (MeecoMedia) -> Void
+    let onSelect: (MeecoComment) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach(Array(comments.enumerated()), id: \.element.id) { index, comment in
+                Button {
+                    onSelect(comment)
+                } label: {
+                    CommentThreadRow(
+                        comment: comment,
+                        activeAncestorDepths: activeAncestorDepths(for: index),
+                        continuesCurrentDepth: continuesCurrentDepth(for: index),
+                        onImageTap: onImageTap
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private func activeAncestorDepths(for index: Int) -> Set<Int> {
+        guard comments[index].replyDepth > 0 else { return [] }
+
+        let currentDepth = min(max(comments[index].replyDepth, 0), 3)
+        let followingDepths = comments.dropFirst(index + 1)
+            .prefix { $0.replyDepth > 0 }
+            .map { min(max($0.replyDepth, 0), 3) }
+
+        return Set((1..<currentDepth).filter { depth in
+            followingDepths.contains { $0 >= depth }
+        })
+    }
+
+    private func continuesCurrentDepth(for index: Int) -> Bool {
+        let currentDepth = min(max(comments[index].replyDepth, 0), 3)
+        guard currentDepth > 0, comments.indices.contains(index + 1) else { return false }
+        return min(max(comments[index + 1].replyDepth, 0), 3) > currentDepth
+    }
+}
+
+struct CommentThreadRow: View {
+    let comment: MeecoComment
+    let activeAncestorDepths: Set<Int>
+    let continuesCurrentDepth: Bool
+    let onImageTap: (MeecoMedia) -> Void
+
+    private var clampedDepth: Int {
+        min(max(comment.replyDepth, 0), 3)
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            if clampedDepth > 0 {
+                ReplyTreeGuides(
+                    depth: clampedDepth,
+                    activeAncestorDepths: activeAncestorDepths,
+                    continuesCurrentDepth: continuesCurrentDepth
+                )
+            }
+
+            CommentCard(comment: comment, onImageTap: onImageTap)
+        }
+    }
+}
+
+struct ReplyTreeGuides: View {
+    let depth: Int
+    let activeAncestorDepths: Set<Int>
+    let continuesCurrentDepth: Bool
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 0) {
+            ForEach(0..<depth, id: \.self) { index in
+                if index == depth - 1 {
+                    ReplyConnector(continues: continuesCurrentDepth)
+                } else if activeAncestorDepths.contains(index + 1) {
+                    ReplyContinuation()
+                } else {
+                    Color.clear.frame(width: 18, height: 58)
+                }
+            }
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+struct ReplyContinuation: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        Rectangle()
+            .fill(lineColor)
+            .frame(width: 1, height: 58)
+            .frame(width: 18)
+    }
+
+    private var lineColor: Color {
+        colorScheme == .dark ? Color.white.opacity(0.34) : Color.secondary.opacity(0.26)
+    }
+}
+
+struct ReplyConnector: View {
+    let continues: Bool
+
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            Rectangle()
+                .fill(lineColor)
+                .frame(width: 1, height: continues ? 58 : 25)
+                .padding(.leading, 8)
+
+            Rectangle()
+                .fill(lineColor)
+                .frame(width: 16, height: 1)
+                .padding(.top, 24)
+                .padding(.leading, 8)
+        }
+        .frame(width: 24, height: 58)
+    }
+
+    private var lineColor: Color {
+        colorScheme == .dark ? Color.white.opacity(0.42) : Color.secondary.opacity(0.34)
+    }
+}
+
+@MainActor
+final class AccountSettingsViewModel: ObservableObject {
+    enum LoadingState: Equatable {
+        case idle
+        case loading
+        case loaded
+        case failed(String)
+    }
+
+    @Published private(set) var loginForm: MeecoLoginForm?
+    @Published private(set) var state: LoadingState = .idle
+
+    private let service: MeecoService
+
+    init(service: MeecoService = MeecoService()) {
+        self.service = service
+    }
+
+    func load() async {
+        guard state != .loading else { return }
+        state = .loading
+        do {
+            loginForm = try await service.fetchLoginForm()
+            state = .loaded
+        } catch {
+            state = .failed(error.localizedDescription)
+        }
+    }
+}
+
+struct AccountSettingsView: View {
+    @Environment(\.dismiss) private var dismiss
+    @StateObject private var viewModel = AccountSettingsViewModel()
+    @State private var webAction: MeecoWebAction?
+
+    var body: some View {
+        NavigationView {
+            List {
+                Section("계정") {
+                    switch viewModel.state {
+                    case .idle, .loading:
+                        HStack {
+                            ProgressView()
+                            Text("로그인 정보를 확인하는 중")
+                        }
+                    case .failed(let message):
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("로그인 영역을 읽지 못했습니다")
+                                .font(.headline)
+                            Text(message)
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            Button("다시 시도") {
+                                Task { await viewModel.load() }
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    case .loaded:
+                        if let loginForm = viewModel.loginForm {
+                            LoginFormSummaryView(loginForm: loginForm)
+                        }
+                    }
+
+                    Button {
+                        webAction = MeecoWebAction(title: "로그인", url: MeecoService.loginFormURL)
+                    } label: {
+                        Label("미코 로그인 열기", systemImage: "person.crop.circle")
+                    }
+                }
+            }
+            .navigationTitle("설정")
+#if os(iOS)
+            .navigationBarTitleDisplayMode(.inline)
+#endif
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("닫기") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+        .sheet(item: $webAction) { action in
+            WebActionView(action: action)
+        }
+        .task {
+            await viewModel.load()
+        }
+    }
+}
+
+struct LoginFormSummaryView: View {
+    let loginForm: MeecoLoginForm
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label("로그인 양식 확인됨", systemImage: "checkmark.circle")
+                .font(.headline)
+            Text("아이디: \(loginForm.userIDField)")
+            Text("비밀번호: \(loginForm.passwordField)")
+            if let keepSignedField = loginForm.keepSignedField {
+                Text("로그인 유지: \(keepSignedField)")
+            }
+        }
+        .font(.caption)
+        .foregroundColor(.secondary)
+        .padding(.vertical, 4)
+    }
+}
+
+#if os(macOS)
+struct WebActionView: View {
+    let action: MeecoWebAction
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text(action.title)
+                    .font(.headline)
+                Spacer()
+                Button("닫기") {
+                    dismiss()
+                }
+            }
+            .padding()
+
+            WebArticleView(url: action.url)
+        }
+        .frame(minWidth: 720, minHeight: 640)
+    }
+}
+
+struct WebArticleView: NSViewRepresentable {
+    let url: URL
+
+    func makeNSView(context: Context) -> WKWebView {
+        WKWebView()
+    }
+
+    func updateNSView(_ nsView: WKWebView, context: Context) {
+        if nsView.url != url {
+            nsView.load(URLRequest(url: url))
+        }
+    }
+}
+#else
+struct WebActionView: View {
+    let action: MeecoWebAction
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationView {
+            WebArticleView(url: action.url)
+                .navigationTitle(action.title)
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("닫기") {
+                            dismiss()
+                        }
+                    }
+                }
+        }
+    }
+}
+
+struct WebArticleView: UIViewRepresentable {
+    let url: URL
+
+    func makeUIView(context: Context) -> WKWebView {
+        WKWebView()
+    }
+
+    func updateUIView(_ uiView: WKWebView, context: Context) {
+        if uiView.url != url {
+            uiView.load(URLRequest(url: url))
+        }
+    }
+}
+#endif
+
+struct MeecoService {
+    typealias BoardSnapshotFetcher = (MeecoBoard, Int, MeecoBoardCategory?) async throws -> MeecoBoardSnapshot
+
+    enum ServiceError: LocalizedError {
+        case invalidResponse
+        case emptyResult
+
+        var errorDescription: String? {
+            switch self {
+            case .invalidResponse:
+                return "서버 응답을 읽을 수 없습니다."
+            case .emptyResult:
+                return "파싱된 내용이 없습니다."
+            }
+        }
+    }
+
+    static let loginFormURL = URL(string: "https://meeco.kr/index.php?act=dispMemberLoginForm")!
+
+    private let parser = MeecoHTMLParser()
+    private let boardSnapshotFetcher: BoardSnapshotFetcher?
+
+    init(boardSnapshotFetcher: BoardSnapshotFetcher? = nil) {
+        self.boardSnapshotFetcher = boardSnapshotFetcher
+    }
+
+    func fetchBoardSnapshot(for board: MeecoBoard, page: Int = 1, category: MeecoBoardCategory? = nil) async throws -> MeecoBoardSnapshot {
+        if let boardSnapshotFetcher {
+            return try await boardSnapshotFetcher(board, page, category)
+        }
+
+        let url = board.pageURL(page, category: category)
+        let html = try await fetchHTML(from: cacheBypassedURL(from: url))
+        let posts = parser.posts(
+            from: html,
+            baseURL: url,
+            allowedBoardPaths: board.allowedBoardPaths,
+            category: category
+        )
+
+        guard !posts.isEmpty else { throw ServiceError.emptyResult }
+        return MeecoBoardSnapshot(posts: posts, page: page, sourceFingerprint: html.hashValue, fetchedAt: Date())
+    }
+
+    func fetchPostDetail(for post: MeecoPost) async throws -> MeecoPostDetail {
+        let html = try await fetchHTML(from: post.url)
+        return parser.postDetail(from: html, fallbackPost: post)
+    }
+
+    func fetchLoginForm() async throws -> MeecoLoginForm {
+        let html = try await fetchHTML(from: Self.loginFormURL)
+        guard let loginForm = parser.loginForm(from: html, baseURL: Self.loginFormURL) else {
+            throw ServiceError.emptyResult
+        }
+
+        return loginForm
+    }
+
+    private func cacheBypassedURL(from url: URL) -> URL {
+        guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            return url
+        }
+
+        var queryItems = components.queryItems ?? []
+        queryItems.removeAll { $0.name == "_meeco_refresh" }
+        queryItems.append(URLQueryItem(name: "_meeco_refresh", value: UUID().uuidString))
+        components.queryItems = queryItems
+        return components.url ?? url
+    }
+
+    private func fetchHTML(from url: URL) async throws -> String {
+        var request = URLRequest(url: url)
+        request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+        request.timeoutInterval = 20
+        request.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15", forHTTPHeaderField: "User-Agent")
+        request.setValue("no-cache, no-store, max-age=0", forHTTPHeaderField: "Cache-Control")
+        request.setValue("no-cache", forHTTPHeaderField: "Pragma")
+        request.setValue("0", forHTTPHeaderField: "Expires")
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200..<400).contains(httpResponse.statusCode),
+              let html = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .init(rawValue: CFStringConvertEncodingToNSStringEncoding(CFStringEncoding(CFStringEncodings.EUC_KR.rawValue)))) else {
+            throw ServiceError.invalidResponse
+        }
+
+        return html
+    }
+}
+
+struct MeecoHTMLParser {
+    private let ignoredTitles: Set<String> = [
+        "로그인",
+        "회원가입",
+        "목록",
+        "쓰기",
+        "새 글 쓰기",
+        "전체",
+        "검색",
+        "이전",
+        "다음"
+    ]
+
+    func posts(from html: String, baseURL: URL, allowedBoardPaths: Set<String>?, category: MeecoBoardCategory? = nil) -> [MeecoPost] {
+        let rows = html.matches(pattern: #"<tr\b[^>]*>(.*?)</tr>"#, options: [.caseInsensitive, .dotMatchesLineSeparators])
+        let rowPosts = rows.compactMap {
+            post(
+                fromRowHTML: $0[1],
+                baseURL: baseURL,
+                allowedBoardPaths: allowedBoardPaths,
+                requiredCategory: category
+            )
+        }
+
+        if !rowPosts.isEmpty {
+            return unique(rowPosts)
+        }
+
+        let listItems = html.matches(pattern: #"<li\b[^>]*>(.*?)</li>"#, options: [.caseInsensitive, .dotMatchesLineSeparators])
+        let listPosts = listItems.compactMap {
+            post(
+                fromRowHTML: $0[1],
+                baseURL: baseURL,
+                allowedBoardPaths: allowedBoardPaths,
+                requiredCategory: category
+            )
+        }
+
+        if !listPosts.isEmpty {
+            return unique(listPosts)
+        }
+
+        return unique(postsFromAnchors(
+            html: html,
+            baseURL: baseURL,
+            allowedBoardPaths: allowedBoardPaths,
+            requiredCategory: category
+        ))
+    }
+
+    func postDetail(from html: String, fallbackPost: MeecoPost) -> MeecoPostDetail {
+        let title = bestTitle(from: html, fallbackTitle: fallbackPost.title)
+        let bodyHTML = firstContentBlock(in: html) ?? ""
+        let body = bodyWithoutLeadingTitle(bodyHTML.displayText.nonEmpty ?? html.displayText, title: title)
+        let media = mediaItems(from: bodyHTML, baseURL: fallbackPost.url)
+        let comments = comments(from: html, baseURL: fallbackPost.url, postAuthorNickname: fallbackPost.nickname)
+
+        return MeecoPostDetail(
+            title: title,
+            nickname: fallbackPost.nickname,
+            date: fallbackPost.date,
+            body: body,
+            media: media,
+            comments: comments
+        )
+    }
+
+    func loginForm(from html: String, baseURL: URL) -> MeecoLoginForm? {
+        let forms = html.matches(
+            pattern: #"<form\b([^>]*)>(.*?)</form>"#,
+            options: [.caseInsensitive, .dotMatchesLineSeparators]
+        )
+
+        guard let form = forms.first(where: { match in
+            match.count > 2 && match[2].localizedCaseInsensitiveContains("procMemberLogin")
+        }) else {
+            return nil
+        }
+
+        let formAttributes = form[1]
+        let formHTML = form[2]
+        let action = attributeValue(named: "action", in: formAttributes) ?? "/"
+        let method = (attributeValue(named: "method", in: formAttributes) ?? "GET").uppercased()
+
+        guard let actionURL = URL(string: action, relativeTo: baseURL)?.absoluteURL,
+              let userIDField = inputName(in: formHTML, matching: "user_id"),
+              let passwordField = inputName(in: formHTML, matching: "password") else {
+            return nil
+        }
+
+        let keepSignedField = inputName(in: formHTML, matching: "keep_signed")
+
+        return MeecoLoginForm(
+            actionURL: actionURL,
+            method: method,
+            userIDField: userIDField,
+            passwordField: passwordField,
+            keepSignedField: keepSignedField,
+            keepSignedDefaultValue: inputValue(in: formHTML, named: keepSignedField),
+            validatorID: inputValue(in: formHTML, named: "xe_validator_id"),
+            signUpURL: firstLinkURL(in: html, containing: "dispMemberSignUpForm", baseURL: baseURL),
+            findAccountURL: firstLinkURL(in: html, containing: "dispMemberFindAccount", baseURL: baseURL)
+        )
+    }
+
+    private func post(fromRowHTML rowHTML: String, baseURL: URL, allowedBoardPaths: Set<String>?, requiredCategory: MeecoBoardCategory?) -> MeecoPost? {
+        guard let anchor = articleAnchors(in: rowHTML, baseURL: baseURL, allowedBoardPaths: allowedBoardPaths).first else {
+            return nil
+        }
+        guard postMatchesCategory(rowHTML: rowHTML, anchor: anchor, requiredCategory: requiredCategory) else {
+            return nil
+        }
+
+        let cells = rowHTML.matches(pattern: #"<t[dh]\b[^>]*>(.*?)</t[dh]>"#, options: [.caseInsensitive, .dotMatchesLineSeparators])
+            .map { $0[1].plainHTMLText }
+            .filter { !$0.isEmpty }
+        let rowText = rowHTML.plainHTMLText
+        let title = anchor.title.nonEmpty ?? titleFromCells(cells, excluding: anchor.documentID) ?? rowText
+        guard shouldUseTitle(title) else { return nil }
+
+        let date = inferDate(from: cells, rowHTML: rowHTML, rowText: rowText, title: title)
+        let nickname = inferNickname(from: cells, rowHTML: rowHTML, rowText: rowText, title: title, date: date)
+        let commentCount = inferCommentCount(from: rowHTML, title: title)
+        let upvoteCount = inferPostUpvoteCount(from: rowHTML, cells: cells, title: title, date: date, nickname: nickname)
+        let loweredRow = rowText.lowercased()
+
+        return MeecoPost(
+            id: anchor.url,
+            documentID: anchor.documentID,
+            title: title,
+            nickname: nickname,
+            date: date,
+            url: anchor.url,
+            boardPath: anchor.boardPath,
+            category: inferCategory(from: cells, title: title) ?? anchor.categoryID,
+            commentCount: commentCount,
+            upvoteCount: upvoteCount,
+            isNotice: rowText.contains("공지"),
+            isHot: loweredRow.contains("핫글") || loweredRow.contains("hot")
+        )
+    }
+
+    private func postsFromAnchors(html: String, baseURL: URL, allowedBoardPaths: Set<String>?, requiredCategory: MeecoBoardCategory?) -> [MeecoPost] {
+        let requiredCategoryID = requiredCategory?.categoryID
+        return articleAnchors(in: html, baseURL: baseURL, allowedBoardPaths: allowedBoardPaths).compactMap { anchor -> MeecoPost? in
+            guard shouldUseTitle(anchor.title) else { return nil }
+            if let requiredCategoryID, anchor.categoryID != requiredCategoryID {
+                return nil
+            }
+            return MeecoPost(
+                id: anchor.url,
+                documentID: anchor.documentID,
+                title: anchor.title,
+                nickname: "",
+                date: "",
+                url: anchor.url,
+                boardPath: anchor.boardPath,
+                category: anchor.categoryID,
+                commentCount: nil,
+                upvoteCount: 0,
+                isNotice: false,
+                isHot: false
+            )
+        }
+    }
+
+    private func articleAnchors(in html: String, baseURL: URL, allowedBoardPaths: Set<String>?) -> [ArticleAnchor] {
+        let matches = html.matches(
+            pattern: #"<a\s+([^>]*\bhref\s*=\s*[\"']([^\"']+)[\"'][^>]*)>(.*?)</a>"#,
+            options: [.caseInsensitive, .dotMatchesLineSeparators]
+        )
+
+        let anchors = matches.compactMap { match -> ArticleAnchor? in
+            let attributes = match[1]
+            let href = match[2].htmlDecoded
+            let title = match[3].plainHTMLText.nonEmpty ?? attributeValue(named: "title", in: attributes)?.plainHTMLText ?? ""
+            guard let url = URL(string: href, relativeTo: baseURL)?.absoluteURL,
+                  url.fragment == nil,
+                  let info = articleInfo(from: url, allowedBoardPaths: allowedBoardPaths) else {
+                return nil
+            }
+
+            let isTitleLink = attributes.localizedCaseInsensitiveContains("title_a")
+            guard isTitleLink || shouldUseTitle(title) else {
+                return nil
+            }
+
+            return ArticleAnchor(
+                url: url,
+                title: title,
+                boardPath: info.boardPath,
+                documentID: info.documentID,
+                categoryID: categoryID(from: url),
+                isTitleLink: isTitleLink
+            )
+        }
+
+        return anchors.sorted { lhs, rhs in
+            if lhs.isTitleLink != rhs.isTitleLink {
+                return lhs.isTitleLink
+            }
+
+            return lhs.title.count > rhs.title.count
+        }
+    }
+
+    private func articleInfo(from url: URL, allowedBoardPaths: Set<String>?) -> (boardPath: String, documentID: String)? {
+        let components = url.pathComponents.filter { $0 != "/" }
+        guard components.count == 2,
+              let boardPath = components.first,
+              let documentID = components.last?.components(separatedBy: "#").first,
+              documentID.allSatisfy(\.isNumber) else {
+            return nil
+        }
+
+        if let allowedBoardPaths, !allowedBoardPaths.contains(boardPath) {
+            return nil
+        }
+
+        return (boardPath, documentID)
+    }
+
+    private func postMatchesCategory(rowHTML: String, anchor: ArticleAnchor, requiredCategory: MeecoBoardCategory?) -> Bool {
+        guard let requiredCategoryID = requiredCategory?.categoryID else { return true }
+        let categoryMatches = anchor.categoryID == requiredCategoryID
+            || rowHTML.localizedCaseInsensitiveContains("/category/\(requiredCategoryID)")
+            || rowHTML.localizedCaseInsensitiveContains("category=\(requiredCategoryID)")
+
+        guard categoryMatches else { return false }
+
+        if requiredCategoryID == "23941775" {
+            return isNoticeRow(rowHTML)
+        }
+
+        let isPromotedRow = rowHTML.localizedCaseInsensitiveContains("hot_text")
+            || rowHTML.localizedCaseInsensitiveContains("notice_text")
+        if isPromotedRow {
+            return false
+        }
+
+        if rowHTML.localizedCaseInsensitiveContains("list_ctg"),
+           let requiredCategoryTitle = requiredCategory?.title {
+            return rowCategoryTitle(rowHTML) == requiredCategoryTitle
+        }
+
+        return true
+    }
+
+    private func isNoticeRow(_ rowHTML: String) -> Bool {
+        let rowText = rowHTML.plainHTMLText
+        return rowHTML.localizedCaseInsensitiveContains("notice_text")
+            || rowHTML.localizedCaseInsensitiveContains("list_ctg")
+                && rowText.components(separatedBy: .whitespacesAndNewlines).contains("공지")
+    }
+
+    private func rowCategoryTitle(_ rowHTML: String) -> String? {
+        rowHTML.firstMatch(
+            pattern: #"<span\b[^>]*class=[\"'][^\"']*list_ctg[^\"']*[\"'][^>]*>(.*?)</span>"#,
+            group: 1,
+            options: [.caseInsensitive, .dotMatchesLineSeparators]
+        )?.plainHTMLText
+    }
+
+    private func categoryID(from url: URL) -> String? {
+        URLComponents(url: url, resolvingAgainstBaseURL: false)?
+            .queryItems?
+            .first(where: { $0.name == "category" })?
+            .value
+    }
+
+    private func attributeValue(named name: String, in attributes: String) -> String? {
+        attributes.firstMatch(
+            pattern: #"\#(name)\s*=\s*[\"']([^\"']+)[\"']"#,
+            group: 1,
+            options: [.caseInsensitive]
+        )?.htmlDecoded
+    }
+
+    private func inputName(in html: String, matching expectedName: String) -> String? {
+        html.matches(pattern: #"<input\b([^>]*)>"#, options: [.caseInsensitive])
+            .compactMap { match -> String? in
+                guard match.count > 1 else { return nil }
+                let name = attributeValue(named: "name", in: match[1])
+                return name?.caseInsensitiveCompare(expectedName) == .orderedSame ? name : nil
+            }
+            .first
+    }
+
+    private func inputValue(in html: String, named name: String?) -> String? {
+        guard let name else { return nil }
+        return html.matches(pattern: #"<input\b([^>]*)>"#, options: [.caseInsensitive])
+            .compactMap { match -> String? in
+                guard match.count > 1,
+                      attributeValue(named: "name", in: match[1])?.caseInsensitiveCompare(name) == .orderedSame else {
+                    return nil
+                }
+                return attributeValue(named: "value", in: match[1])
+            }
+            .first
+    }
+
+    private func firstLinkURL(in html: String, containing marker: String, baseURL: URL) -> URL? {
+        html.matches(
+            pattern: #"<a\s+([^>]*\bhref\s*=\s*["']([^"']+)["'][^>]*)>"#,
+            options: [.caseInsensitive]
+        )
+        .compactMap { match -> URL? in
+            guard match.count > 2 else { return nil }
+            let href = match[2].htmlDecoded
+            guard href.localizedCaseInsensitiveContains(marker) else { return nil }
+            return URL(string: href, relativeTo: baseURL)?.absoluteURL
+        }
+        .first
+    }
+
+    private func inferDate(from cells: [String], rowHTML: String, rowText: String, title: String) -> String {
+        if let date = explicitDate(from: rowHTML) {
+            return date
+        }
+
+        let searchCells = cellsAfterTitle(cells, title: title) + cells
+        if let date = searchCells.first(where: { $0.isPostDate }) {
+            return date
+        }
+
+        return rowText.firstMatch(pattern: #"(\d{2}\.\d{2}\.\d{2}\.?|\d{4}\.\d{2}\.\d{2}\.?|\d{1,2}:\d{2}|방금\s*전|\d+\s*(?:분|시간|일)\s*전)"#) ?? ""
+    }
+
+    private func inferNickname(from cells: [String], rowHTML: String, rowText: String, title: String, date: String) -> String {
+        if let explicitNickname = explicitNickname(from: rowHTML),
+           !explicitNickname.isEmpty,
+           explicitNickname != title,
+           !explicitNickname.isPostDate {
+            return explicitNickname
+        }
+
+        if let listInfoNickname = listInfoFields(from: rowHTML)
+            .first(where: { $0.isLikelyNickname(excluding: title) }) {
+            return listInfoNickname
+        }
+
+        if rowHTML.localizedCaseInsensitiveContains("list_cmt")
+            && !rowHTML.localizedCaseInsensitiveContains("list_info") {
+            return ""
+        }
+
+        let afterTitle = cellsAfterTitle(cells, title: title)
+        if let dateIndex = afterTitle.firstIndex(where: { $0 == date || $0.isPostDate }) {
+            let candidates = afterTitle[..<dateIndex].reversed()
+            if let nickname = candidates.first(where: { $0.isLikelyNickname(excluding: title) }) {
+                return nickname
+            }
+        }
+
+        if let titleRange = rowText.range(of: title) {
+            let tail = rowText[titleRange.upperBound...]
+                .replacingOccurrences(of: date, with: "")
+                .replacingOccurrences(of: #"\[\d+\]"#, with: " ", options: .regularExpression)
+                .components(separatedBy: " ")
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            if let nickname = tail.first(where: { $0.isLikelyNickname(excluding: title) }) {
+                return nickname
+            }
+        }
+
+        return ""
+    }
+
+    private func explicitDate(from rowHTML: String) -> String? {
+        let datePatterns = [
+            #"<(?:span|time|div)\b[^>]*class=[\"'][^\"']*(?:date|time)[^\"']*[\"'][^>]*>(.*?)</(?:span|time|div)>"#,
+            #"<div\b[^>]*class=[\"'][^\"']*list_info[^\"']*[\"'][^>]*>(.*?)</div>"#
+        ]
+
+        for pattern in datePatterns {
+            let fields = rowHTML.matches(pattern: pattern, options: [.caseInsensitive, .dotMatchesLineSeparators])
+                .compactMap { $0.count > 1 ? $0[1].plainHTMLText.nonEmpty : nil }
+            if let date = fields.first(where: { $0.isPostDate }) {
+                return date
+            }
+            if let date = fields.compactMap({ $0.firstMatch(pattern: #"(\d{2}\.\d{2}\.\d{2}\.?|\d{4}\.\d{2}\.\d{2}\.?|\d{1,2}:\d{2}|방금\s*전|\d+\s*(?:분|시간|일)\s*전)"#) }).first {
+                return date
+            }
+        }
+
+        return listInfoFields(from: rowHTML).first(where: { $0.isPostDate })
+    }
+
+    private func listInfoFields(from rowHTML: String) -> [String] {
+        guard let listInfoRange = rowHTML.range(of: #"class=["'][^"']*list_info[^"']*["']"#, options: [.regularExpression, .caseInsensitive]) else {
+            return []
+        }
+
+        let listInfoHTML = String(rowHTML[listInfoRange.lowerBound...])
+            .components(separatedBy: #"class="list_cmt""#).first?
+            .components(separatedBy: #"class='list_cmt'"#).first ?? String(rowHTML[listInfoRange.lowerBound...])
+        let structuredFields = listInfoHTML.matches(
+            pattern: #"<(?:div|span|time)\b[^>]*>(.*?)</(?:div|span|time)>"#,
+            options: [.caseInsensitive, .dotMatchesLineSeparators]
+        )
+        .compactMap { $0.count > 1 ? $0[1].plainHTMLText.nonEmpty : nil }
+        .filter { field in
+            field.isPostDate
+                || field.isLikelyNickname(excluding: "")
+                || field.firstMatch(pattern: #"^\d+\s*(?:분|시간|일)\s*전$"#) != nil
+        }
+
+        if !structuredFields.isEmpty {
+            return structuredFields
+        }
+
+        return listInfoHTML.plainHTMLText
+            .replacingOccurrences(of: #"\s{2,}"#, with: "\n", options: .regularExpression)
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
+    private func explicitNickname(from rowHTML: String) -> String? {
+        let patterns = [
+            #"<(?:span|a)\s*class=[\"'][^\"']*(?:member|author|nick)[^\"']*[\"'][^>]*>(.*?)</(?:span|a)>"#,
+            #"<(?:span|a)\b[^>]*class=[\"'][^\"']*(?:member|author|nick)[^\"']*[\"'][^>]*>(.*?)</(?:span|a)>"#,
+            #"<div\b[^>]*class=[\"'][^\"']*(?:author|nick)[^\"']*[\"'][^>]*>(.*?)</div>"#
+        ]
+
+        for pattern in patterns {
+            if let nickname = rowHTML.firstMatch(
+                pattern: pattern,
+                group: 1,
+                options: [.caseInsensitive, .dotMatchesLineSeparators]
+            )?.plainHTMLText, !nickname.isEmpty {
+                return nickname
+            }
+        }
+
+        return nil
+    }
+
+    private func inferCategory(from cells: [String], title: String) -> String? {
+        guard let titleIndex = cells.firstIndex(where: { $0.contains(title) }), titleIndex > 0 else {
+            return nil
+        }
+
+        let candidate = cells[titleIndex - 1]
+        return candidate.isLikelyCategory ? candidate : nil
+    }
+
+    private func titleFromCells(_ cells: [String], excluding documentID: String) -> String? {
+        cells.first { cell in
+            shouldUseTitle(cell)
+                && cell != documentID
+                && !cell.isPostDate
+                && cell.firstMatch(pattern: #"^\d+$"#) == nil
+        }
+    }
+
+    private func inferCommentCount(from rowHTML: String, title: String) -> Int? {
+        let text = rowHTML.plainHTMLText
+        if text.contains(title),
+           let match = text.firstMatch(pattern: #"\[(\d+)\]"#) {
+            return Int(match)
+        }
+
+        if let match = rowHTML.firstMatch(
+            pattern: #"<a\b[^>]*class=[\"'][^\"']*list_cmt[^\"']*[\"'][^>]*>(\d+)</a>"#,
+            options: [.caseInsensitive, .dotMatchesLineSeparators]
+        ) {
+            return Int(match)
+        }
+
+        return nil
+    }
+
+    private func inferPostUpvoteCount(from rowHTML: String, cells: [String], title: String, date: String, nickname: String) -> Int {
+        if let vote = rowHTML.firstMatch(
+            pattern: #"<(?:div|span)\b[^>]*class=[\"'][^\"']*list_vote[^\"']*[\"'][^>]*>.*?(\d+).*?</(?:div|span)>"#,
+            options: [.caseInsensitive, .dotMatchesLineSeparators]
+        ) {
+            return Int(vote) ?? 0
+        }
+
+        if rowHTML.localizedCaseInsensitiveContains("<td"),
+           let vote = cells.last(where: { $0.firstMatch(pattern: #"^\d+$"#) != nil }) {
+            return Int(vote) ?? 0
+        }
+
+        let trailingNumericCells = cellsAfterTitle(cells, title: title)
+            .filter { cell in
+                cell != nickname
+                    && cell != date
+                    && !cell.isPostDate
+                    && cell.firstMatch(pattern: #"^\d+$"#) != nil
+            }
+
+        return trailingNumericCells.last.flatMap(Int.init) ?? 0
+    }
+
+    private func cellsAfterTitle(_ cells: [String], title: String) -> [String] {
+        guard let index = cells.firstIndex(where: { $0.contains(title) }) else {
+            return cells
+        }
+
+        return Array(cells.dropFirst(index + 1))
+    }
+
+    private func firstMetaContent(named name: String, in html: String) -> String? {
+        html.firstMatch(pattern: #"<meta\s+property=[\"']\#(name)[\"']\s+content=[\"']([^\"']+)[\"']"#, group: 1, options: [.caseInsensitive])
+    }
+
+    private func bestTitle(from html: String, fallbackTitle: String) -> String {
+        let candidates = [
+            firstMetaContent(named: "og:title", in: html),
+            html.firstMatch(
+                pattern: #"<h1\b[^>]*>(.*?)</h1>"#,
+                group: 1,
+                options: [.caseInsensitive, .dotMatchesLineSeparators]
+            ),
+            html.firstMatch(
+                pattern: #"<(?:h1|h2|div|span)\b[^>]*class=[\"'][^\"']*(?:title|subject)[^\"']*[\"'][^>]*>(.*?)</(?:h1|h2|div|span)>"#,
+                group: 1,
+                options: [.caseInsensitive, .dotMatchesLineSeparators]
+            ),
+            fallbackTitle
+        ]
+
+        return candidates
+            .compactMap { $0?.normalizedPostTitle }
+            .filter { shouldUseTitle($0) }
+            .max { $0.count < $1.count } ?? fallbackTitle.plainHTMLText
+    }
+
+    private func bodyWithoutLeadingTitle(_ body: String, title: String) -> String {
+        let lines = body
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        guard let firstLine = lines.first else {
+            return body
+        }
+
+        let normalizedTitle = title.normalizedPostTitle
+        let normalizedFirstLine = firstLine.normalizedPostTitle
+        guard normalizedFirstLine == normalizedTitle || normalizedFirstLine.hasPrefix(normalizedTitle) else {
+            return body
+        }
+
+        return lines.dropFirst().joined(separator: "\n").nonEmpty ?? body
+    }
+
+    private func firstContentBlock(in html: String) -> String? {
+        let patterns = [
+            #"<!--BeforeDocument\([^)]*\)-->(.*?)<!--AfterDocument"#,
+            #"<div\b[^>]*class=[\"'][^\"']*xe_content[^\"']*[\"'][^>]*>(.*?)</div>"#,
+            #"<article\b[^>]*>(.*?)</article>"#,
+            #"<div\b[^>]*class=[\"'][^\"']*rd_body[^\"']*[\"'][^>]*>(.*?)</div>"#,
+            #"<div\b[^>]*id=[\"']document_\d+[\"'][^>]*>(.*?)</div>"#
+        ]
+
+        for pattern in patterns {
+            if let block = html.firstMatch(pattern: pattern, group: 1, options: [.caseInsensitive, .dotMatchesLineSeparators]), !block.displayText.isEmpty {
+                return block
+            }
+        }
+
+        return nil
+    }
+
+    private func comments(from html: String, baseURL: URL, postAuthorNickname: String) -> [MeecoComment] {
+        let commentHTML = commentSection(in: html) ?? html
+        let articleBlocks = commentHTML.matches(
+            pattern: #"<article\b([^>]*class=[\"'][^\"']*(?:cmt-el|cmt_unit)[^\"']*[\"'][^>]*)>(.*?)</article>"#,
+            options: [.caseInsensitive, .dotMatchesLineSeparators]
+        )
+
+        let legacyBlocks = commentHTML.matches(
+            pattern: #"<li\b([^>]*class=[\"'][^\"']*(?:comment|fdb)[^\"']*[\"'][^>]*)>(.*?)</li>"#,
+            options: [.caseInsensitive, .dotMatchesLineSeparators]
+        )
+        let blocks = articleBlocks.isEmpty ? legacyBlocks : articleBlocks
+
+        let parsedComments = blocks.compactMap { match -> ParsedComment? in
+            guard match.count > 2 else { return nil }
+            let attributes = match[1]
+            let block = match[2]
+            let bodyHTML = block.firstMatch(
+                pattern: #"<!--BeforeComment\([^)]*\)-->(.*?)<!--AfterComment"#,
+                group: 1,
+                options: [.caseInsensitive, .dotMatchesLineSeparators]
+            ) ?? block.firstMatch(
+                pattern: #"<div\b[^>]*class=[\"'][^\"']*(?:comment_\d+_\d+|xe_content)[^\"']*[\"'][^>]*>(.*?)</div>"#,
+                group: 1,
+                options: [.caseInsensitive, .dotMatchesLineSeparators]
+            ) ?? block
+            let body = bodyHTML.displayText.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard body.count > 2 else { return nil }
+            let nickname = explicitNickname(from: block) ?? ""
+            let date = block.firstMatch(pattern: #"(\d{4}\.\d{2}\.\d{2}\.?\s*\d{2}:\d{2}|\d{2}\.\d{2}\.\d{2}\.?|\d{1,2}:\d{2}|방금\s*전|\d+\s*(?:분|시간|일)\s*전)"#) ?? ""
+            let media = mediaItems(from: bodyHTML, baseURL: baseURL)
+            let upvoteCount = commentUpvoteCount(from: block)
+            let explicitDepth = commentReplyDepth(attributes: attributes, block: block)
+            let targetNickname = commentTargetNickname(from: block)
+            return ParsedComment(
+                nickname: nickname,
+                date: date,
+                body: body,
+                media: media,
+                upvoteCount: upvoteCount,
+                explicitDepth: explicitDepth,
+                targetNickname: targetNickname
+            )
+        }
+
+        var lastDepthByNickname: [String: Int] = [:]
+        let postAuthorKey = normalizedNickname(postAuthorNickname)
+
+        return parsedComments.map { parsedComment in
+            let targetDepth = parsedComment.targetNickname
+                .map(normalizedNickname)
+                .flatMap { lastDepthByNickname[$0] }
+            let resolvedDepth: Int
+            if let targetDepth {
+                resolvedDepth = min(max(targetDepth + 1, parsedComment.explicitDepth), 6)
+            } else {
+                resolvedDepth = parsedComment.explicitDepth
+            }
+
+            let nicknameKey = normalizedNickname(parsedComment.nickname)
+            if !nicknameKey.isEmpty {
+                lastDepthByNickname[nicknameKey] = resolvedDepth
+            }
+
+            return MeecoComment(
+                nickname: parsedComment.nickname,
+                date: parsedComment.date,
+                body: parsedComment.body,
+                media: parsedComment.media,
+                upvoteCount: parsedComment.upvoteCount,
+                replyDepth: resolvedDepth,
+                isPostAuthor: !postAuthorKey.isEmpty && nicknameKey == postAuthorKey
+            )
+        }
+    }
+
+    private func commentTargetNickname(from block: String) -> String? {
+        guard let targetText = block.firstMatch(
+            pattern: #"<div\b[^>]*class=["'][^"']*cmt_to[^"']*["'][^>]*>(.*?)</div>"#,
+            group: 1,
+            options: [.caseInsensitive, .dotMatchesLineSeparators]
+        )?.plainHTMLText.nonEmpty else {
+            return nil
+        }
+
+        return targetText
+            .replacingOccurrences(of: "@", with: "")
+            .replacingOccurrences(of: "님에게", with: "")
+            .replacingOccurrences(of: "님", with: "")
+            .components(separatedBy: .newlines)
+            .joined(separator: " ")
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .nonEmpty
+    }
+
+    private func normalizedNickname(_ nickname: String) -> String {
+        nickname
+            .plainHTMLText
+            .replacingOccurrences(of: "@", with: "")
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+    }
+
+    private func commentReplyDepth(attributes: String, block: String) -> Int {
+        let loweredAttributes = attributes.lowercased()
+        let loweredBlock = block.lowercased()
+
+        if let depthText = loweredAttributes.firstMatch(pattern: #"(?:depth|indent|reply)[_-]?(\d+)"#),
+           let depth = Int(depthText) {
+            return max(1, min(depth, 6))
+        }
+
+        if loweredAttributes.firstMatch(pattern: #"class\s*=\s*["'][^"']*(?:^|\s)(?:reply|recomment)(?:\s|$)[^"']*["']"#) != nil
+            || loweredBlock.firstMatch(pattern: #"<i\b[^>]*class=["'][^"']*icon_reply[^"']*["']"#) != nil
+            || loweredBlock.firstMatch(pattern: #"<div\b[^>]*class=["'][^"']*cmt_to[^"']*["']"#) != nil {
+            return 1
+        }
+
+        return 0
+    }
+
+    private func commentSection(in html: String) -> String? {
+        guard let commentStart = html.range(
+            of: #"<div\b[^>]*id=["']comment["'][^>]*>"#,
+            options: [.regularExpression, .caseInsensitive]
+        )?.lowerBound else {
+            return nil
+        }
+
+        let tail = String(html[commentStart...])
+        let endMarkers = [
+            #"<div\b[^>]*class=["'][^"']*list_d[^"']*["']"#,
+            #"<div\b[^>]*class=["'][^"']*bd_lst[^"']*["']"#,
+            #"<footer\b"#
+        ]
+
+        for marker in endMarkers {
+            if let end = tail.range(of: marker, options: [.regularExpression, .caseInsensitive])?.lowerBound,
+               end > tail.startIndex {
+                return String(tail[..<end])
+            }
+        }
+
+        return tail
+    }
+
+    private func commentUpvoteCount(from block: String) -> Int {
+        block.firstMatch(
+            pattern: #"<span\b[^>]*class=[\"'][^\"']*cmt_vote_up[^\"']*[\"'][^>]*>.*?<b\b[^>]*class=[\"'][^\"']*num[^\"']*[\"'][^>]*>(\d+)</b>"#,
+            options: [.caseInsensitive, .dotMatchesLineSeparators]
+        ).flatMap(Int.init) ?? 0
+    }
+
+    private func mediaItems(from html: String, baseURL: URL) -> [MeecoMedia] {
+        var seen = Set<URL>()
+        var items: [MeecoMedia] = []
+
+        func appendMedia(url: URL, altText: String, kind: MeecoMedia.Kind) {
+            guard seen.insert(url).inserted else { return }
+            items.append(MeecoMedia(id: url, url: url, altText: altText, kind: kind))
+        }
+
+        let imageMatches = html.matches(
+            pattern: #"<img\b([^>]*)>"#,
+            options: [.caseInsensitive, .dotMatchesLineSeparators]
+        )
+        for match in imageMatches {
+            guard match.count > 1 else { continue }
+            let attributes = match[1]
+            guard let src = mediaSource(in: attributes),
+                  let url = URL(string: src, relativeTo: baseURL)?.absoluteURL,
+                  shouldUseImageURL(url) else {
+                continue
+            }
+
+            appendMedia(url: url, altText: attributeValue(named: "alt", in: attributes)?.plainHTMLText ?? "", kind: .image)
+        }
+
+        let videoMatches = html.matches(
+            pattern: #"<(?:video|source)\b([^>]*)>"#,
+            options: [.caseInsensitive, .dotMatchesLineSeparators]
+        )
+        for match in videoMatches {
+            guard match.count > 1,
+                  let src = mediaSource(in: match[1]),
+                  let url = URL(string: src, relativeTo: baseURL)?.absoluteURL,
+                  shouldUseVideoURL(url) else {
+                continue
+            }
+
+            appendMedia(url: url, altText: "첨부 동영상", kind: .video)
+        }
+
+        let iframeMatches = html.matches(
+            pattern: #"<iframe\b([^>]*)>"#,
+            options: [.caseInsensitive, .dotMatchesLineSeparators]
+        )
+        for match in iframeMatches {
+            guard match.count > 1,
+                  let src = attributeValue(named: "src", in: match[1])?.nonEmpty,
+                  let url = URL(string: src, relativeTo: baseURL)?.absoluteURL,
+                  url.isPreviewableLink else {
+                continue
+            }
+
+            appendMedia(url: url, altText: url.previewTitle, kind: .linkPreview)
+        }
+
+        let linkMatches = html.matches(
+            pattern: #"<a\s+([^>]*\bhref\s*=\s*[\"']([^\"']+)[\"'][^>]*)>(.*?)</a>"#,
+            options: [.caseInsensitive, .dotMatchesLineSeparators]
+        )
+        for match in linkMatches {
+            guard match.count > 3,
+                  let url = URL(string: match[2].htmlDecoded, relativeTo: baseURL)?.absoluteURL else {
+                continue
+            }
+
+            let label = match[3].plainHTMLText
+            if shouldUseImageURL(url) {
+                appendMedia(url: url, altText: label, kind: .image)
+            } else if shouldUseVideoURL(url) {
+                appendMedia(url: url, altText: label.nonEmpty ?? "첨부 동영상", kind: .video)
+            } else if url.isPreviewableLink {
+                appendMedia(url: url, altText: label.nonEmpty ?? url.previewTitle, kind: .linkPreview)
+            }
+        }
+
+        return items
+    }
+
+    private func mediaSource(in attributes: String) -> String? {
+        let candidates = [
+            attributeValue(named: "src", in: attributes),
+            attributeValue(named: "data-src", in: attributes),
+            attributeValue(named: "data-original", in: attributes),
+            attributeValue(named: "data-lazy-src", in: attributes),
+            attributeValue(named: "poster", in: attributes),
+            attributeValue(named: "srcset", in: attributes)?.components(separatedBy: ",").first?.components(separatedBy: .whitespaces).first
+        ]
+
+        return candidates.compactMap { $0?.htmlDecoded.nonEmpty }.first
+    }
+
+    private func shouldUseImageURL(_ url: URL) -> Bool {
+        let path = url.path.lowercased()
+        guard path.hasSuffix(".jpg")
+            || path.hasSuffix(".jpeg")
+            || path.hasSuffix(".png")
+            || path.hasSuffix(".gif")
+            || path.hasSuffix(".webp")
+            || path.hasSuffix(".heic")
+            || path.hasSuffix(".heif") else {
+            return false
+        }
+
+        return !path.contains("/profile_image/")
+            && !path.contains("/addons/")
+            && !path.contains("/images/new")
+            && !path.contains("/modules/document/tpl/icons/")
+    }
+
+    private func shouldUseVideoURL(_ url: URL) -> Bool {
+        let path = url.path.lowercased()
+        return path.hasSuffix(".mp4")
+            || path.hasSuffix(".mov")
+            || path.hasSuffix(".m4v")
+            || path.hasSuffix(".webm")
+    }
+
+    private func unique(_ posts: [MeecoPost]) -> [MeecoPost] {
+        var indexByURL: [URL: Int] = [:]
+        var result: [MeecoPost] = []
+
+        for post in posts {
+            if let existingIndex = indexByURL[post.url] {
+                result[existingIndex] = mergedPost(result[existingIndex], with: post)
+            } else {
+                indexByURL[post.url] = result.count
+                result.append(post)
+                if result.count == 80 {
+                    break
+                }
+            }
+        }
+
+        return result
+    }
+
+    private func mergedPost(_ current: MeecoPost, with candidate: MeecoPost) -> MeecoPost {
+        MeecoPost(
+            id: current.id,
+            documentID: current.documentID,
+            title: current.title.isEmpty ? candidate.title : current.title,
+            nickname: current.nickname.nonEmpty ?? candidate.nickname,
+            date: current.date.nonEmpty ?? candidate.date,
+            url: current.url,
+            boardPath: current.boardPath,
+            category: current.category ?? candidate.category,
+            commentCount: current.commentCount ?? candidate.commentCount,
+            upvoteCount: max(current.upvoteCount, candidate.upvoteCount),
+            isNotice: current.isNotice || candidate.isNotice,
+            isHot: current.isHot || candidate.isHot
+        )
+    }
+
+    private func shouldUseTitle(_ title: String) -> Bool {
+        guard title.count >= 2 else { return false }
+        guard !ignoredTitles.contains(title) else { return false }
+        guard title.firstMatch(pattern: #"^\d+$"#) == nil else { return false }
+        guard !title.localizedCaseInsensitiveContains("Image:") else { return false }
+        guard !title.hasPrefix("[") || !title.hasSuffix("]") else { return false }
+        return true
+    }
+}
+
+private struct ArticleAnchor {
+    let url: URL
+    let title: String
+    let boardPath: String
+    let documentID: String
+    let categoryID: String?
+    let isTitleLink: Bool
+}
+
+private struct ParsedComment {
+    let nickname: String
+    let date: String
+    let body: String
+    let media: [MeecoMedia]
+    let upvoteCount: Int
+    let explicitDepth: Int
+    let targetNickname: String?
+}
+
+private extension String {
+    var plainHTMLText: String {
+        replacingOccurrences(of: #"<script\b[^>]*>.*?</script>"#, with: " ", options: [.regularExpression, .caseInsensitive])
+            .replacingOccurrences(of: #"<style\b[^>]*>.*?</style>"#, with: " ", options: [.regularExpression, .caseInsensitive])
+            .removingHTMLTags
+            .htmlDecoded
+            .removingHTMLTags
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var displayText: String {
+        replacingOccurrences(of: #"<script\b[^>]*>.*?</script>"#, with: " ", options: [.regularExpression, .caseInsensitive])
+            .replacingOccurrences(of: #"<style\b[^>]*>.*?</style>"#, with: " ", options: [.regularExpression, .caseInsensitive])
+            .replacingOccurrences(of: #"<br\b[^>]*>"#, with: "\n", options: [.regularExpression, .caseInsensitive])
+            .replacingOccurrences(of: #"</?(p|div|li|tr|h[1-6]|blockquote)\b[^>]*>"#, with: "\n", options: [.regularExpression, .caseInsensitive])
+            .removingHTMLTags
+            .htmlDecoded
+            .removingHTMLTags
+            .replacingOccurrences(of: #"[ \t]+"#, with: " ", options: .regularExpression)
+            .replacingOccurrences(of: #"\n[ \t]+"#, with: "\n", options: .regularExpression)
+            .replacingOccurrences(of: #"\n{3,}"#, with: "\n\n", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var removingHTMLTags: String {
+        replacingOccurrences(of: #"<[^>]+>"#, with: " ", options: .regularExpression)
+    }
+
+    var htmlDecoded: String {
+        var decoded = self
+        let entities = [
+            "&amp;": "&",
+            "&quot;": "\"",
+            "&#34;": "\"",
+            "&#39;": "'",
+            "&apos;": "'",
+            "&lt;": "<",
+            "&gt;": ">",
+            "&nbsp;": " "
+        ]
+
+        for (entity, character) in entities {
+            decoded = decoded.replacingOccurrences(of: entity, with: character)
+        }
+
+        return decoded.decodingNumericHTMLEntities
+    }
+
+    var decodingNumericHTMLEntities: String {
+        var decoded = self
+        let matches = decoded.matches(pattern: #"&#(x?[0-9A-Fa-f]+);"#)
+        for match in matches.reversed() {
+            guard match.count > 1 else { continue }
+            let token = match[1]
+            let radix = token.lowercased().hasPrefix("x") ? 16 : 10
+            let digits = radix == 16 ? String(token.dropFirst()) : token
+            guard let scalarValue = UInt32(digits, radix: radix),
+                  let scalar = UnicodeScalar(scalarValue) else {
+                continue
+            }
+            decoded = decoded.replacingOccurrences(of: match[0], with: String(Character(scalar)))
+        }
+        return decoded
+    }
+
+    var nonEmpty: String? {
+        isEmpty ? nil : self
+    }
+
+    var normalizedPostTitle: String {
+        plainHTMLText
+            .replacingOccurrences(of: #"(?i)\s*-\s*미코\s*$"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var isPostDate: Bool {
+        firstMatch(pattern: #"^(\d{2}\.\d{2}\.\d{2}\.?|\d{4}\.\d{2}\.\d{2}\.?|\d{1,2}:\d{2}|방금\s*전|\d+\s*(?:분|시간|일)\s*전)$"#) != nil
+    }
+
+    var isLikelyCategory: Bool {
+        !isEmpty && count <= 8 && firstMatch(pattern: #"\d"#) == nil
+    }
+
+    func isLikelyNickname(excluding title: String) -> Bool {
+        if self == "익명" || localizedCaseInsensitiveCompare("Anonymous") == .orderedSame {
+            return true
+        }
+        guard !isEmpty, self != title, !contains(title), count <= 24 else { return false }
+        guard firstMatch(pattern: #"^\d+$"#) == nil else { return false }
+        guard firstMatch(pattern: #"^\[\d+\]$"#) == nil else { return false }
+        guard !isPostDate else { return false }
+        let excluded = ["공지", "핫글", "미니", "음향", "소식", "리뷰", "차량", "TV", "생활", "file", "update"]
+        return !excluded.contains(self)
+    }
+
+    func matches(pattern: String, options: NSRegularExpression.Options = []) -> [[String]] {
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: options) else {
+            return []
+        }
+
+        let nsRange = NSRange(startIndex..<endIndex, in: self)
+        return regex.matches(in: self, range: nsRange).map { result in
+            (0..<result.numberOfRanges).map { index in
+                guard let range = Range(result.range(at: index), in: self) else { return "" }
+                return String(self[range])
+            }
+        }
+    }
+
+    func firstMatch(pattern: String, group: Int = 1, options: NSRegularExpression.Options = []) -> String? {
+        matches(pattern: pattern, options: options).first.flatMap { match in
+            guard match.indices.contains(group) else { return nil }
+            return match[group]
+        }
+    }
+}
+
+private extension URL {
+    var normalizedHost: String {
+        (host ?? "").lowercased().replacingOccurrences(of: "www.", with: "")
+    }
+
+    var isPreviewableLink: Bool {
+        guard scheme?.lowercased().hasPrefix("http") == true else { return false }
+        let host = normalizedHost
+        return host == "youtube.com"
+            || host == "youtu.be"
+            || host == "m.youtube.com"
+            || host == "x.com"
+            || host == "twitter.com"
+            || host == "instagram.com"
+            || host == "threads.net"
+    }
+
+    var previewTitle: String {
+        switch normalizedHost {
+        case "youtube.com", "m.youtube.com", "youtu.be":
+            return "YouTube"
+        case "x.com", "twitter.com":
+            return "X"
+        case "instagram.com":
+            return "Instagram"
+        case "threads.net":
+            return "Threads"
+        default:
+            return host ?? absoluteString
+        }
+    }
+
+    var previewSystemImage: String {
+        switch normalizedHost {
+        case "youtube.com", "m.youtube.com", "youtu.be":
+            return "play.rectangle.fill"
+        case "instagram.com":
+            return "camera.fill"
+        case "x.com", "twitter.com", "threads.net":
+            return "quote.bubble.fill"
+        default:
+            return "link"
+        }
+    }
+
+    var youtubeThumbnailURL: URL? {
+        guard let videoID = youtubeVideoID else { return nil }
+        return URL(string: "https://img.youtube.com/vi/\(videoID)/hqdefault.jpg")
+    }
+
+    private var youtubeVideoID: String? {
+        let host = normalizedHost
+        if host == "youtu.be" {
+            return pathComponents.filter { $0 != "/" }.first
+        }
+
+        if host == "youtube.com" || host == "m.youtube.com" {
+            let components = URLComponents(url: self, resolvingAgainstBaseURL: false)
+            if let id = components?.queryItems?.first(where: { $0.name == "v" })?.value {
+                return id
+            }
+
+            let pathParts = pathComponents.filter { $0 != "/" }
+            if let shortsIndex = pathParts.firstIndex(of: "shorts"), pathParts.indices.contains(shortsIndex + 1) {
+                return pathParts[shortsIndex + 1]
+            }
+            if let embedIndex = pathParts.firstIndex(of: "embed"), pathParts.indices.contains(embedIndex + 1) {
+                return pathParts[embedIndex + 1]
+            }
+        }
+
+        return nil
     }
 }
 

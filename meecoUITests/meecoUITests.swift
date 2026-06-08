@@ -2,8 +2,6 @@
 //  meecoUITests.swift
 //  meecoUITests
 //
-//  Created by 김병철 on 2023/07/08.
-//
 
 import XCTest
 
