@@ -740,6 +740,47 @@ final class meecoTests: XCTestCase {
         XCTAssertEqual(detail.nickname, "kty4")
         XCTAssertTrue(detail.body.contains("알림패널 상단"))
         XCTAssertTrue(detail.body.contains("퀵패널"))
+        XCTAssertNil(detail.dealInfo)
+    }
+
+    func testParserReadsSpecialDealStatusAndLinksBelowHeader() throws {
+        let post = MeecoPost(
+            id: URL(string: "https://meeco.kr/Price/41490020")!,
+            documentID: "41490020",
+            title: "테스트 특가",
+            nickname: "작성자",
+            date: "26.06.08",
+            url: URL(string: "https://meeco.kr/Price/41490020")!,
+            boardPath: "Price",
+            category: "미니",
+            commentCount: nil,
+            upvoteCount: 0,
+            isNotice: false,
+            isHot: false
+        )
+        let html = """
+        <meta property=\"og:title\" content=\"테스트 특가 - 미코\" />
+        <div class=\"atc-ex\">
+            <table>
+                <tr><th>진행</th><td>판매중</td></tr>
+                <tr><th>구매 링크</th><td><a href=\"https://store.example.com/item\">스토어 바로가기</a></td></tr>
+            </table>
+        </div>
+        <div class=\"xe_content\">
+            <p>본문입니다</p>
+            <p><a href=\"https://another.example.com/deal\">추가 구매처</a></p>
+            <p><a href=\"https://meeco.kr/Price\">내부 링크</a></p>
+        </div>
+        """
+
+        let detail = MeecoHTMLParser().postDetail(from: html, fallbackPost: post)
+
+        XCTAssertEqual(detail.dealInfo?.status, "진행 중")
+        XCTAssertEqual(detail.dealInfo?.links.map(\.title), ["스토어 바로가기", "추가 구매처"])
+        XCTAssertEqual(detail.dealInfo?.links.map(\.url.absoluteString), [
+            "https://store.example.com/item",
+            "https://another.example.com/deal"
+        ])
     }
 
     func testParserRemovesHTMLTagsFromPostDetailTitleAndBody() throws {

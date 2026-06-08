@@ -602,6 +602,18 @@ struct MeecoPostDetail: Equatable {
     let body: String
     let media: [MeecoMedia]
     let comments: [MeecoComment]
+    let dealInfo: MeecoDealInfo?
+}
+
+struct MeecoDealInfo: Equatable {
+    let status: String?
+    let links: [MeecoDealLink]
+}
+
+struct MeecoDealLink: Identifiable, Equatable {
+    let id: URL
+    let title: String
+    let url: URL
 }
 
 struct MeecoMedia: Identifiable, Equatable {
@@ -1896,6 +1908,10 @@ struct PostDetailView: View {
                             .font(.subheadline)
                             .foregroundColor(.secondary)
                     }
+
+                    if let dealInfo = detail.dealInfo {
+                        SpecialDealInfoView(dealInfo: dealInfo)
+                    }
                 }
 
                 Text(detail.body)
@@ -1921,6 +1937,38 @@ struct PostDetailView: View {
             .padding(.bottom, 76)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+}
+
+struct SpecialDealInfoView: View {
+    let dealInfo: MeecoDealInfo
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let status = dealInfo.status {
+                Label(status, systemImage: status == "종료" ? "xmark.circle.fill" : "checkmark.circle.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundColor(status == "종료" ? .secondary : .green)
+            }
+
+            if !dealInfo.links.isEmpty {
+                HStack(spacing: 8) {
+                    ForEach(dealInfo.links.prefix(3)) { link in
+                        Link(destination: link.url) {
+                            Label(link.title, systemImage: "cart.fill")
+                                .font(.caption.weight(.semibold))
+                                .lineLimit(1)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(Color.accentColor.opacity(0.12))
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+        .padding(.top, 4)
     }
 }
 
@@ -2507,6 +2555,9 @@ struct MeecoHTMLParser {
         let body = bodyWithoutLeadingTitle(bodyHTML.displayText.nonEmpty ?? html.displayText, title: title)
         let media = mediaItems(from: bodyHTML, baseURL: fallbackPost.url)
         let comments = comments(from: html, baseURL: fallbackPost.url, postAuthorNickname: fallbackPost.nickname)
+        let dealInfo = fallbackPost.boardPath == "Price"
+            ? priceDealInfo(from: html, bodyHTML: bodyHTML, baseURL: fallbackPost.url, fallbackTitle: title)
+            : nil
 
         return MeecoPostDetail(
             title: title,
@@ -2514,8 +2565,90 @@ struct MeecoHTMLParser {
             date: fallbackPost.date,
             body: body,
             media: media,
-            comments: comments
+            comments: comments,
+            dealInfo: dealInfo
         )
+    }
+
+    private func priceDealInfo(from html: String, bodyHTML: String, baseURL: URL, fallbackTitle: String) -> MeecoDealInfo? {
+        let rows = priceExtraRows(from: html)
+        let explicitStatus = rows
+            .first { row in row.label.contains("진행") || row.label.contains("상태") || row.label.localizedCaseInsensitiveContains("status") }
+            .map(\.value.normalizedDealStatus)
+            .flatMap { $0 }
+        let inferredStatus = explicitStatus ?? inferredDealStatus(title: fallbackTitle, bodyHTML: bodyHTML)
+        let links = priceDealLinks(from: rows, bodyHTML: bodyHTML, baseURL: baseURL)
+
+        guard inferredStatus != nil || !links.isEmpty else { return nil }
+        return MeecoDealInfo(status: inferredStatus, links: links)
+    }
+
+    private func priceExtraRows(from html: String) -> [(label: String, value: String, valueHTML: String)] {
+        guard let tableHTML = html.firstMatch(
+            pattern: #"<div\b[^>]*class=[\"'][^\"']*atc-ex[^\"']*[\"'][^>]*>.*?<table\b[^>]*>(.*?)</table>"#,
+            group: 1,
+            options: [.caseInsensitive, .dotMatchesLineSeparators]
+        ) else {
+            return []
+        }
+
+        return tableHTML.matches(pattern: #"<tr\b[^>]*>(.*?)</tr>"#, options: [.caseInsensitive, .dotMatchesLineSeparators])
+            .compactMap { match -> (label: String, value: String, valueHTML: String)? in
+                guard match.count > 1 else { return nil }
+                let rowHTML = match[1]
+                let cells = rowHTML.matches(pattern: #"<t[dh]\b[^>]*>(.*?)</t[dh]>"#, options: [.caseInsensitive, .dotMatchesLineSeparators])
+                guard cells.count >= 2 else { return nil }
+                let label = cells[0][1].plainHTMLText
+                let valueHTML = cells.dropFirst().map { $0[1] }.joined(separator: " ")
+                let value = valueHTML.plainHTMLText
+                guard !label.isEmpty || !value.isEmpty else { return nil }
+                return (label, value, valueHTML)
+            }
+    }
+
+    private func inferredDealStatus(title: String, bodyHTML: String) -> String? {
+        let combined = [title, bodyHTML.plainHTMLText]
+            .joined(separator: " ")
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+        if combined.contains("종료") || combined.localizedCaseInsensitiveContains("expired") || combined.localizedCaseInsensitiveContains("sold out") {
+            return "종료"
+        }
+        return "진행 중"
+    }
+
+    private func priceDealLinks(from rows: [(label: String, value: String, valueHTML: String)], bodyHTML: String, baseURL: URL) -> [MeecoDealLink] {
+        let rowLinkHTML = rows
+            .filter { row in
+                row.label.contains("링크")
+                    || row.label.contains("구매")
+                    || row.label.contains("판매")
+                    || row.label.localizedCaseInsensitiveContains("url")
+                    || row.label.localizedCaseInsensitiveContains("link")
+            }
+            .map(\.valueHTML)
+            .joined(separator: " ")
+        let linkHTML = [rowLinkHTML, bodyHTML].joined(separator: " ")
+        var seen = Set<URL>()
+
+        return linkHTML.matches(
+            pattern: #"<a\s+([^>]*\bhref\s*=\s*[\"']([^\"']+)[\"'][^>]*)>(.*?)</a>"#,
+            options: [.caseInsensitive, .dotMatchesLineSeparators]
+        )
+        .compactMap { match -> MeecoDealLink? in
+            guard match.count > 3,
+                  let url = URL(string: match[2].htmlDecoded, relativeTo: baseURL)?.absoluteURL,
+                  isExternalDealURL(url),
+                  seen.insert(url).inserted else {
+                return nil
+            }
+            let title = match[3].plainHTMLText.nonEmpty ?? url.host ?? "구매 링크"
+            return MeecoDealLink(id: url, title: title, url: url)
+        }
+    }
+
+    private func isExternalDealURL(_ url: URL) -> Bool {
+        guard let host = url.host?.lowercased(), !host.contains("meeco.kr") else { return false }
+        return !shouldUseImageURL(url) && !shouldUseVideoURL(url)
     }
 
     func loginForm(from html: String, baseURL: URL) -> MeecoLoginForm? {
@@ -3434,6 +3567,20 @@ private extension String {
 
     var nonEmpty: String? {
         isEmpty ? nil : self
+    }
+
+    var normalizedDealStatus: String? {
+        let normalized = plainHTMLText
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return nil }
+        if normalized.contains("종료") || normalized.localizedCaseInsensitiveContains("expired") || normalized.localizedCaseInsensitiveContains("sold out") {
+            return "종료"
+        }
+        if normalized.contains("진행") || normalized.contains("판매") || normalized.localizedCaseInsensitiveContains("active") || normalized.localizedCaseInsensitiveContains("available") {
+            return "진행 중"
+        }
+        return normalized
     }
 
     var normalizedPostTitle: String {
