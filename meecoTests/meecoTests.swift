@@ -783,6 +783,30 @@ final class meecoTests: XCTestCase {
         ])
     }
 
+    func testSpecialDealEndedStateUsesPriceBoardOnly() throws {
+        func post(title: String, boardPath: String = "Price") -> MeecoPost {
+            MeecoPost(
+                id: URL(string: "https://meeco.kr/\(boardPath)/41490021")!,
+                documentID: "41490021",
+                title: title,
+                nickname: "작성자",
+                date: "26.06.08",
+                url: URL(string: "https://meeco.kr/\(boardPath)/41490021")!,
+                boardPath: boardPath,
+                category: nil,
+                commentCount: nil,
+                upvoteCount: 0,
+                isNotice: false,
+                isHot: false
+            )
+        }
+
+        XCTAssertTrue(post(title: "종료").isEndedSpecialDeal)
+        XCTAssertTrue(post(title: "[종료] 테스트 특가").isEndedSpecialDeal)
+        XCTAssertFalse(post(title: "12일 종료 예정 특가").isEndedSpecialDeal)
+        XCTAssertFalse(post(title: "종료", boardPath: "mini").isEndedSpecialDeal)
+    }
+
     func testParserRemovesHTMLTagsFromPostDetailTitleAndBody() throws {
         let post = MeecoPost(
             id: URL(string: "https://meeco.kr/mini/41482340")!,

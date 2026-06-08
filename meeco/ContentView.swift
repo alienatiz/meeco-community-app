@@ -568,6 +568,15 @@ struct MeecoPost: Identifiable, Equatable {
         components?.fragment = "comment"
         return components?.url ?? url
     }
+
+    var isEndedSpecialDeal: Bool {
+        guard boardPath == "Price" else { return false }
+        let normalizedTitle = title.normalizedPostTitle
+        return normalizedTitle == "종료"
+            || normalizedTitle == "[종료]"
+            || normalizedTitle.hasPrefix("[종료]")
+            || normalizedTitle.hasPrefix("종료 ")
+    }
 }
 
 struct MeecoWebAction: Identifiable {
@@ -1219,6 +1228,10 @@ struct CategoryTabBar: View {
 struct PostRow: View {
     let post: MeecoPost
 
+    private var isEndedDeal: Bool {
+        post.isEndedSpecialDeal
+    }
+
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 6) {
@@ -1226,28 +1239,28 @@ struct PostRow: View {
                     if post.isNotice || post.isHot {
                         Text(post.isNotice ? "공지" : "핫글")
                             .font(.caption2.weight(.bold))
-                            .foregroundColor(post.isNotice ? .accentColor : .pink)
+                            .foregroundColor(isEndedDeal ? .secondary : (post.isNotice ? .accentColor : .pink))
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
-                            .background((post.isNotice ? Color.accentColor : Color.pink).opacity(0.12))
+                            .background((isEndedDeal ? Color.secondary : (post.isNotice ? Color.accentColor : Color.pink)).opacity(0.12))
                             .clipShape(RoundedRectangle(cornerRadius: 4))
                     }
 
                     Text(post.title)
                         .font(.body)
-                        .foregroundColor(.primary)
+                        .foregroundColor(isEndedDeal ? .secondary : .primary)
                         .lineLimit(2)
                 }
 
                 Text([post.nickname, post.date].filter { !$0.isEmpty }.joined(separator: " "))
                     .font(.caption)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(.secondary.opacity(isEndedDeal ? 0.72 : 1))
                     .lineLimit(1)
             }
 
             Spacer(minLength: 8)
 
-            PostStatsColumn(commentCount: post.commentCount, upvoteCount: post.upvoteCount)
+            PostStatsColumn(commentCount: post.commentCount, upvoteCount: post.upvoteCount, isDimmed: isEndedDeal)
         }
         .padding(.vertical, 6)
     }
@@ -1256,6 +1269,7 @@ struct PostRow: View {
 struct PostStatsColumn: View {
     let commentCount: Int?
     let upvoteCount: Int
+    var isDimmed = false
 
     var body: some View {
         VStack(alignment: .trailing, spacing: 5) {
@@ -1275,7 +1289,7 @@ struct PostStatsColumn: View {
                 Text("\(count)")
                     .monospacedDigit()
             }
-            .foregroundColor(color)
+            .foregroundColor(isDimmed ? .secondary : color)
         } else {
             Color.clear.frame(height: 14)
         }
