@@ -1247,8 +1247,8 @@ struct PostStatsColumn: View {
 
     var body: some View {
         VStack(alignment: .trailing, spacing: 5) {
-            statRow(systemImage: "text.bubble", count: commentCount ?? 0, color: .accentColor)
             statRow(systemImage: "heart.fill", count: upvoteCount, color: .pink)
+            statRow(systemImage: "text.bubble", count: commentCount ?? 0, color: .accentColor)
         }
         .frame(width: 58, alignment: .trailing)
         .font(.caption.weight(.semibold))
