@@ -14,20 +14,14 @@ struct ContentView: View {
     @State private var webAction: MeecoWebAction?
 
     var body: some View {
-        TabView(selection: $selectedTab) {
-            ForEach(MeecoAppTab.allCases) { tab in
-                NavigationView {
-                    BoardDirectoryView(
-                        sections: tab.sections,
-                        title: tab.title,
-                        selectedTab: $selectedTab,
-                        onSearch: openRootSearch
-                    )
-                }
-                .tag(tab)
-            }
+        NavigationView {
+            BoardDirectoryView(
+                sections: selectedTab.sections,
+                title: selectedTab.title,
+                selectedTab: $selectedTab,
+                onSearch: openRootSearch
+            )
         }
-        .hideRootTabBar()
         .sheet(item: $webAction) { action in
             WebActionView(action: action)
         }
@@ -122,26 +116,32 @@ struct RootNavigationBar: View {
                     Button {
                         selectedTab = tab
                     } label: {
-                        Image(systemName: tab.systemImage)
-                            .font(.headline.weight(selectedTab == tab ? .semibold : .regular))
-                            .foregroundColor(selectedTab == tab ? .accentColor : .secondary)
-                            .frame(width: 52, height: 48)
+                        VStack(spacing: 3) {
+                            Image(systemName: tab.systemImage)
+                                .font(.title3.weight(selectedTab == tab ? .bold : .semibold))
+                            Text(tab.title)
+                                .font(.caption.weight(selectedTab == tab ? .bold : .semibold))
+                        }
+                        .foregroundColor(selectedTab == tab ? .accentColor : .secondary)
+                        .frame(width: 72, height: 58)
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel(tab.title)
                 }
             }
-            .padding(.horizontal, 6)
-            .frame(height: 54)
-            .boardLiquidGlass(cornerRadius: 27)
+            .padding(.horizontal, 8)
+            .frame(height: 64)
+            .boardLiquidGlass(cornerRadius: 32)
 
             Button(action: onSearch) {
                 Image(systemName: "magnifyingglass")
-                    .font(.headline.weight(.semibold))
+                    .font(.title2.weight(.bold))
+                    .foregroundColor(.white)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .frame(width: 54, height: 54)
-            .boardLiquidGlassButton()
+            .frame(width: 66, height: 66)
+            .rootProminentLiquidGlassButton()
+            .shadow(color: Color.accentColor.opacity(0.28), radius: 16, y: 6)
             .accessibilityLabel("검색")
         }
         .padding(.horizontal, 16)
@@ -1208,44 +1208,65 @@ struct PostRow: View {
     let post: MeecoPost
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                if post.isNotice || post.isHot {
-                    Text(post.isNotice ? "공지" : "핫글")
-                        .font(.caption2.weight(.bold))
-                        .foregroundColor(post.isNotice ? .accentColor : .pink)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background((post.isNotice ? Color.accentColor : Color.pink).opacity(0.12))
-                        .clipShape(RoundedRectangle(cornerRadius: 4))
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    if post.isNotice || post.isHot {
+                        Text(post.isNotice ? "공지" : "핫글")
+                            .font(.caption2.weight(.bold))
+                            .foregroundColor(post.isNotice ? .accentColor : .pink)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background((post.isNotice ? Color.accentColor : Color.pink).opacity(0.12))
+                            .clipShape(RoundedRectangle(cornerRadius: 4))
+                    }
+
+                    Text(post.title)
+                        .font(.body)
+                        .foregroundColor(.primary)
+                        .lineLimit(2)
                 }
 
-                Text(post.title)
-                    .font(.body)
-                    .foregroundColor(.primary)
-                    .lineLimit(2)
-                Spacer(minLength: 8)
-                if let commentCount = post.commentCount, commentCount > 0 {
-                    Label("\(commentCount)", systemImage: "text.bubble")
-                        .font(.caption)
-                        .foregroundColor(.accentColor)
-                        .labelStyle(.titleAndIcon)
-                }
-            }
-
-            HStack(spacing: 8) {
                 Text([post.nickname, post.date].filter { !$0.isEmpty }.joined(separator: " "))
+                    .font(.caption)
+                    .foregroundColor(.secondary)
                     .lineLimit(1)
-                if post.upvoteCount > 0 {
-                    Label("\(post.upvoteCount)", systemImage: "heart.fill")
-                        .labelStyle(.titleAndIcon)
-                        .foregroundColor(.pink)
-                }
             }
-            .font(.caption)
-            .foregroundColor(.secondary)
+
+            Spacer(minLength: 8)
+
+            PostStatsColumn(commentCount: post.commentCount, upvoteCount: post.upvoteCount)
         }
         .padding(.vertical, 6)
+    }
+}
+
+struct PostStatsColumn: View {
+    let commentCount: Int?
+    let upvoteCount: Int
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 5) {
+            statRow(systemImage: "text.bubble", count: commentCount ?? 0, color: .accentColor)
+            statRow(systemImage: "heart.fill", count: upvoteCount, color: .pink)
+        }
+        .frame(width: 58, alignment: .trailing)
+        .font(.caption.weight(.semibold))
+    }
+
+    @ViewBuilder
+    private func statRow(systemImage: String, count: Int, color: Color) -> some View {
+        if count > 0 {
+            HStack(spacing: 4) {
+                Image(systemName: systemImage)
+                    .frame(width: 14)
+                Text("\(count)")
+                    .monospacedDigit()
+            }
+            .foregroundColor(color)
+        } else {
+            Color.clear.frame(height: 14)
+        }
     }
 }
 
@@ -1649,7 +1670,7 @@ enum ImageMetadataReader {
 private extension View {
     @ViewBuilder
     func showRootTabBar() -> some View {
-        self.hideRootTabBar()
+        self
     }
 
     @ViewBuilder
@@ -1695,6 +1716,28 @@ private extension View {
 #else
         self
             .buttonStyle(.bordered)
+            .clipShape(Circle())
+#endif
+    }
+
+    @ViewBuilder
+    func rootProminentLiquidGlassButton() -> some View {
+#if os(iOS)
+        if #available(iOS 26.0, *) {
+            self
+                .buttonStyle(.plain)
+                .glassEffect(.regular.tint(.accentColor).interactive(), in: Circle())
+                .clipShape(Circle())
+        } else {
+            self
+                .buttonStyle(.plain)
+                .background(Color.accentColor)
+                .clipShape(Circle())
+        }
+#else
+        self
+            .buttonStyle(.plain)
+            .background(Color.accentColor)
             .clipShape(Circle())
 #endif
     }
@@ -2545,7 +2588,7 @@ struct MeecoHTMLParser {
             category: inferCategory(from: cells, title: title) ?? anchor.categoryID,
             commentCount: commentCount,
             upvoteCount: upvoteCount,
-            isNotice: rowText.contains("공지"),
+            isNotice: isNoticeRow(rowHTML),
             isHot: loweredRow.contains("핫글") || loweredRow.contains("hot")
         )
     }

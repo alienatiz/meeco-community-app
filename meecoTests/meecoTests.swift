@@ -519,6 +519,25 @@ final class meecoTests: XCTestCase {
         ])
     }
 
+    func testParserDoesNotMarkTitleContainingNoticeAsNotice() throws {
+        let html = """
+        <li class=\"has_cmt\">
+            <a class=\"list_link\" href=\"/mini/41490010\" title=\"공지처럼 보이는 일반 글\"></a>
+            <div class=\"list_title\">공지처럼 보이는 일반 글</div>
+            <div class=\"list_info\"><div><span class=\"member_1\">작성자</span></div><div>1시간 전</div></div>
+        </li>
+        """
+
+        let posts = MeecoHTMLParser().posts(
+            from: html,
+            baseURL: URL(string: "https://meeco.kr/mini")!,
+            allowedBoardPaths: ["mini"]
+        )
+
+        XCTAssertEqual(posts.first?.title, "공지처럼 보이는 일반 글")
+        XCTAssertEqual(posts.first?.isNotice, false)
+    }
+
     func testParserRejectsPromotedRowsInsideCategoryTabs() throws {
         let html = """
         <li class=\"has_cmt\">
