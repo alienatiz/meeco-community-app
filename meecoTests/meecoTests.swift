@@ -805,6 +805,37 @@ final class meecoTests: XCTestCase {
         ])
     }
 
+    func testParserPreservesSpecialDealRevenueRedirectLinks() throws {
+        let post = MeecoPost(
+            id: URL(string: "https://meeco.kr/Price/41490022")!,
+            documentID: "41490022",
+            title: "수익 링크 특가",
+            nickname: "작성자",
+            date: "26.06.08",
+            url: URL(string: "https://meeco.kr/Price/41490022")!,
+            boardPath: "Price",
+            category: "미니",
+            commentCount: nil,
+            upvoteCount: 0,
+            isNotice: false,
+            isHot: false
+        )
+        let html = """
+        <div class=\"atc-ex\">
+            <table>
+                <tr><th>구매 링크</th><td><a class=\"dis_func_link\" af_srl=\"4262\" href=\"https://click.linkprice.com/click.php?m=gmarket&a=A100682872&tu=https%3A%2F%2Fitem.gmarket.co.kr%2Fitem%3Fgoodscode%3D958106477\">https://item.gmarket.co.kr/item?goodscode=958106477</a></td></tr>
+            </table>
+        </div>
+        <div class=\"xe_content\"><p>본문입니다</p></div>
+        """
+
+        let link = MeecoHTMLParser().postDetail(from: html, fallbackPost: post).dealInfo?.links.first
+
+        XCTAssertEqual(link?.title, "https://item.gmarket.co.kr/item?goodscode=958106477")
+        XCTAssertEqual(link?.url.host, "click.linkprice.com")
+        XCTAssertEqual(link?.isRevenueGenerating, true)
+    }
+
     func testSpecialDealEndedStateUsesPriceBoardOnly() throws {
         func post(title: String, boardPath: String = "Price") -> MeecoPost {
             MeecoPost(

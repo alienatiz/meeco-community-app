@@ -624,6 +624,7 @@ struct MeecoDealLink: Identifiable, Equatable {
     let id: URL
     let title: String
     let url: URL
+    var isRevenueGenerating = false
 }
 
 struct MeecoMedia: Identifiable, Equatable {
@@ -2061,12 +2062,13 @@ struct SpecialDealInfoView: View {
                 HStack(spacing: 8) {
                     ForEach(dealInfo.links.prefix(3)) { link in
                         Link(destination: link.url) {
-                            Label(link.title, systemImage: "cart.fill")
+                            Label(link.title, systemImage: link.isRevenueGenerating ? "cart.fill.badge.plus" : "cart.fill")
                                 .font(.caption.weight(.semibold))
                                 .lineLimit(1)
+                                .foregroundColor(.black.opacity(0.82))
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 6)
-                                .background(Color.accentColor.opacity(0.12))
+                                .background(Color.yellow.opacity(link.isRevenueGenerating ? 0.88 : 0.68))
                                 .clipShape(RoundedRectangle(cornerRadius: 8))
                         }
                         .buttonStyle(.plain)
@@ -2748,13 +2750,29 @@ struct MeecoHTMLParser {
                 return nil
             }
             let title = match[3].plainHTMLText.nonEmpty ?? url.host ?? "구매 링크"
-            return MeecoDealLink(id: url, title: title, url: url)
+            return MeecoDealLink(
+                id: url,
+                title: title,
+                url: url,
+                isRevenueGenerating: isRevenueGeneratingDealLink(url: url, attributes: match[1])
+            )
         }
     }
 
     private func isExternalDealURL(_ url: URL) -> Bool {
         guard let host = url.host?.lowercased(), !host.contains("meeco.kr") else { return false }
         return !shouldUseImageURL(url) && !shouldUseVideoURL(url)
+    }
+
+    private func isRevenueGeneratingDealLink(url: URL, attributes: String) -> Bool {
+        let host = url.host?.lowercased() ?? ""
+        let loweredAttributes = attributes.lowercased()
+        return loweredAttributes.contains("dis_func_link")
+            || loweredAttributes.contains("af_srl")
+            || host.contains("linkprice.com")
+            || host.contains("coupa.ng")
+            || host.contains("partners.coupang.com")
+            || host.contains("link.coupang.com")
     }
 
     func loginForm(from html: String, baseURL: URL) -> MeecoLoginForm? {
