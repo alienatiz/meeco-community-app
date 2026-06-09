@@ -737,6 +737,7 @@ struct MeecoLoginForm: Equatable {
 struct MeecoAuthStatus: Equatable {
     var isLoggedIn: Bool
     var displayName: String?
+    var profileImageURL: URL?
 }
 
 struct MeecoLoginCredentials {
@@ -2681,7 +2682,7 @@ final class MeecoAuthSession: ObservableObject {
         case unknown
         case checking
         case loggedOut
-        case loggedIn(String?)
+        case loggedIn(displayName: String?, profileImageURL: URL?)
         case failed(String)
     }
 
@@ -2702,13 +2703,27 @@ final class MeecoAuthSession: ObservableObject {
         return false
     }
 
+    var accountDisplayName: String? {
+        if case .loggedIn(let displayName, _) = status {
+            return displayName
+        }
+        return nil
+    }
+
+    var accountProfileImageURL: URL? {
+        if case .loggedIn(_, let profileImageURL) = status {
+            return profileImageURL
+        }
+        return nil
+    }
+
     var statusText: String {
         switch status {
         case .unknown, .checking:
             return "로그인 상태 확인 중"
         case .loggedOut:
             return "로그인이 필요합니다"
-        case .loggedIn(let displayName):
+        case .loggedIn(let displayName, _):
             return [displayName, "로그인됨"].compactMap { $0?.nonEmpty }.joined(separator: " ")
         case .failed(let message):
             return message
@@ -2784,7 +2799,7 @@ final class MeecoAuthSession: ObservableObject {
 
     private func apply(status authStatus: MeecoAuthStatus) async {
         if authStatus.isLoggedIn {
-            status = .loggedIn(authStatus.displayName)
+            status = .loggedIn(displayName: authStatus.displayName, profileImageURL: authStatus.profileImageURL)
             loginForm = nil
         } else {
             status = .loggedOut
@@ -3299,8 +3314,10 @@ struct AccountSettingsView: View {
                         }
                         .padding(.vertical, 4)
                     case .loggedIn:
-                        Label(authSession.statusText, systemImage: "checkmark.circle.fill")
-                            .foregroundColor(.green)
+                        AccountProfileRow(
+                            displayName: authSession.accountDisplayName,
+                            profileImageURL: authSession.accountProfileImageURL
+                        )
                         Button(role: .destructive) {
                             Task { await authSession.logout() }
                         } label: {
@@ -3350,6 +3367,65 @@ struct AccountSettingsView: View {
             await authSession.verifySession()
             await authSession.prepareLoginForm()
         }
+    }
+}
+
+struct AccountProfileRow: View {
+    let displayName: String?
+    let profileImageURL: URL?
+
+    var body: some View {
+        HStack(spacing: 12) {
+            AccountProfileImage(url: profileImageURL)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(displayName?.nonEmpty ?? "미코 계정")
+                    .font(.headline)
+                    .foregroundColor(.primary)
+                    .lineLimit(1)
+
+                Label("로그인됨", systemImage: "checkmark.circle.fill")
+                    .font(.caption)
+                    .foregroundColor(.green)
+            }
+        }
+        .padding(.vertical, 4)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+struct AccountProfileImage: View {
+    let url: URL?
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(Color.secondary.opacity(0.12))
+
+            if let url {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .scaledToFill()
+                    default:
+                        placeholder
+                    }
+                }
+            } else {
+                placeholder
+            }
+        }
+        .frame(width: 48, height: 48)
+        .clipShape(Circle())
+    }
+
+    private var placeholder: some View {
+        Image(systemName: "person.crop.circle.fill")
+            .resizable()
+            .scaledToFit()
+            .foregroundColor(.secondary)
     }
 }
 
@@ -3533,12 +3609,11 @@ struct MeecoService {
     }
 
     func fetchAuthStatus() async throws -> MeecoAuthStatus {
-        if let cookieStatus = authStatusFromCookies() {
-            return cookieStatus
-        }
+        await syncWebViewCookiesToSharedStorage()
+        let cookieStatus = authStatusFromCookies()
         let html = try await fetchHTML(from: Self.loginFormURL, validatesStatus: false)
         let status = parser.authStatus(from: html)
-        return status.isLoggedIn ? status : authStatusFromCookies() ?? status
+        return status.isLoggedIn ? status : cookieStatus ?? authStatusFromCookies() ?? status
     }
 
     func login(credentials: MeecoLoginCredentials, form: MeecoLoginForm) async throws -> MeecoAuthStatus {
@@ -3577,9 +3652,7 @@ struct MeecoService {
 
         let (data, response) = try await URLSession.shared.data(for: request)
         await syncCookiesToWebViewStore(from: response, for: requestURL)
-        if let cookieStatus = authStatusFromCookies(), cookieStatus.isLoggedIn {
-            return cookieStatus
-        }
+        let cookieStatus = authStatusFromCookies()
 
         guard let html = decodeHTML(data) else {
             throw ServiceError.invalidResponse
@@ -3588,6 +3661,10 @@ struct MeecoService {
         let status = parser.authStatus(from: html)
         if status.isLoggedIn {
             return status
+        }
+
+        if let cookieStatus, cookieStatus.isLoggedIn {
+            return cookieStatus
         }
 
         let verifiedStatus = try await fetchAuthStatus()
@@ -3709,10 +3786,10 @@ struct MeecoService {
 
         let value = cookie.value.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty, value.lowercased() != "none" else {
-            return MeecoAuthStatus(isLoggedIn: false, displayName: nil)
+            return MeecoAuthStatus(isLoggedIn: false, displayName: nil, profileImageURL: nil)
         }
 
-        return MeecoAuthStatus(isLoggedIn: true, displayName: nil)
+        return MeecoAuthStatus(isLoggedIn: true, displayName: nil, profileImageURL: nil)
     }
 }
 
@@ -4180,14 +4257,18 @@ struct MeecoHTMLParser {
         let hasLoginForm = loginForm(from: html, baseURL: MeecoService.loginFormURL) != nil
         if hasConcreteLogoutAction(in: html)
             || (!hasLoginForm && hasMemberInfoLink(in: html)) {
-            return MeecoAuthStatus(isLoggedIn: true, displayName: loggedInDisplayName(from: html))
+            return MeecoAuthStatus(
+                isLoggedIn: true,
+                displayName: loggedInDisplayName(from: html),
+                profileImageURL: loggedInProfileImageURL(from: html, baseURL: MeecoService.loginFormURL)
+            )
         }
 
         if hasLoginForm {
-            return MeecoAuthStatus(isLoggedIn: false, displayName: nil)
+            return MeecoAuthStatus(isLoggedIn: false, displayName: nil, profileImageURL: nil)
         }
 
-        return MeecoAuthStatus(isLoggedIn: false, displayName: nil)
+        return MeecoAuthStatus(isLoggedIn: false, displayName: nil, profileImageURL: nil)
     }
 
     private func hasConcreteLogoutAction(in html: String) -> Bool {
@@ -4213,6 +4294,48 @@ struct MeecoHTMLParser {
         return candidates
             .compactMap { $0?.plainHTMLText.nonEmpty }
             .first
+    }
+
+    private func loggedInProfileImageURL(from html: String, baseURL: URL) -> URL? {
+        let imageAttributes = html.matches(
+            pattern: #"<img\b([^>]*)>"#,
+            options: [.caseInsensitive, .dotMatchesLineSeparators]
+        )
+        .compactMap { $0.count > 1 ? $0[1] : nil }
+
+        for attributes in imageAttributes {
+            guard let src = mediaSource(in: attributes)?.nonEmpty else { continue }
+            let imageHint = (attributes + " " + src).lowercased()
+            guard imageHint.contains("profile")
+                || imageHint.contains("avatar")
+                || imageHint.contains("member") else {
+                continue
+            }
+            if let url = URL(string: src.htmlDecoded, relativeTo: baseURL)?.absoluteURL {
+                return url
+            }
+        }
+
+        let backgroundMatches = html.matches(
+            pattern: #"background-image\s*:\s*url\((['"]?)(.*?)\1\)"#,
+            options: [.caseInsensitive, .dotMatchesLineSeparators]
+        )
+
+        for match in backgroundMatches {
+            guard match.count > 2 else { continue }
+            let src = match[2].htmlDecoded
+            let imageHint = src.lowercased()
+            guard imageHint.contains("profile")
+                || imageHint.contains("avatar")
+                || imageHint.contains("member") else {
+                continue
+            }
+            if let url = URL(string: src, relativeTo: baseURL)?.absoluteURL {
+                return url
+            }
+        }
+
+        return nil
     }
 
     private func post(fromRowHTML rowHTML: String, baseURL: URL, allowedBoardPaths: Set<String>?, requiredCategory: MeecoBoardCategory?) -> MeecoPost? {

@@ -822,6 +822,7 @@ final class meecoTests: XCTestCase {
         let loggedInHTML = """
         <nav>
             <a href="/index.php?act=dispMemberInfo">digi</a>
+            <img class="profile" src="/files/member_extra_info/profile_image/38635502.jpg" />
             <a href="/index.php?act=procMemberLogout">로그아웃</a>
         </nav>
         """
@@ -830,6 +831,7 @@ final class meecoTests: XCTestCase {
         let loggedInStatus = parser.authStatus(from: loggedInHTML)
         XCTAssertTrue(loggedInStatus.isLoggedIn)
         XCTAssertEqual(loggedInStatus.displayName, "digi")
+        XCTAssertEqual(loggedInStatus.profileImageURL?.absoluteString, "https://meeco.kr/files/member_extra_info/profile_image/38635502.jpg")
     }
 
     func testParserReadsAttendanceSnapshot() throws {
