@@ -12,11 +12,12 @@ import ImageIO
 struct ContentView: View {
     @State private var selectedTab: MeecoAppTab = .main
     @State private var webAction: MeecoWebAction?
+    @AppStorage("favoriteBoardIDs") private var favoriteBoardIDsStorage = ""
 
     var body: some View {
         NavigationView {
             BoardDirectoryView(
-                sections: selectedTab.sections,
+                sections: selectedTab.sections(favoriteBoardIDs: favoriteBoardIDsStorage.boardIDSet),
                 title: selectedTab.title,
                 selectedTab: $selectedTab,
                 onSearch: openRootSearch
@@ -55,10 +56,10 @@ enum MeecoAppTab: String, CaseIterable, Identifiable {
         }
     }
 
-    var sections: [MeecoDirectorySection] {
+    func sections(favoriteBoardIDs: Set<String>) -> [MeecoDirectorySection] {
         switch self {
         case .main:
-            return MeecoDirectorySection.mainSections
+            return MeecoDirectorySection.mainSections(favoriteBoardIDs: favoriteBoardIDs)
         case .board:
             return MeecoDirectorySection.boardSections
         case .settings:
@@ -176,16 +177,23 @@ struct MeecoDirectorySection: Identifiable {
     let title: String
     let items: [MeecoDirectoryItem]
 
-    static let mainSections: [MeecoDirectorySection] = [
-        MeecoDirectorySection(id: "main", title: "메인", items: [
+    static func mainSections(favoriteBoardIDs: Set<String>) -> [MeecoDirectorySection] {
+        let favoriteItems = MeecoBoard.boards(matching: favoriteBoardIDs).map(MeecoDirectoryItem.board)
+        let favorites = favoriteItems.isEmpty ? [] : [
+            MeecoDirectorySection(id: "favorites", title: "즐겨찾기", items: favoriteItems)
+        ]
+
+        return favorites + [
+            MeecoDirectorySection(id: "main", title: "메인", items: [
             .board(.all),
             .board(.monthly),
             .board(.makgora),
             .web(id: "watchAds", title: "광고 보기", description: "미코 광고 보기", systemImage: "play.rectangle", url: URL(string: "https://meeco.kr/Support/38683562")!),
             .web(id: "sendDonation", title: "도네 쏘기", description: "미코 후원 보내기", systemImage: "paperplane.fill", url: URL(string: "https://meeco.kr/Support/39348818")!),
             .board(.balloon)
-        ])
-    ]
+            ])
+        ]
+    }
 
     static let boardSections: [MeecoDirectorySection] = [
         MeecoDirectorySection(id: "hot", title: "HOT 게시물", items: [.board(.hot)]),
@@ -490,6 +498,16 @@ struct MeecoBoard: Identifiable, Hashable {
         allowedBoardPaths: ["notice"]
     )
 
+    static let allBoards: [MeecoBoard] = [
+        .all, .monthly, .makgora, .balloon, .hot, .news, .mini, .review, .big, .ai,
+        .free, .humor, .gallery, .anonymous, .price, .purchase, .market, .enterprise,
+        .event, .bugUpdate, .notice
+    ]
+
+    static func boards(matching ids: Set<String>) -> [MeecoBoard] {
+        allBoards.filter { ids.contains($0.id) }
+    }
+
     func pageURL(_ page: Int, category: MeecoBoardCategory? = nil) -> URL {
         let baseURL = category?.url ?? url
         guard page > 1,
@@ -610,9 +628,20 @@ struct MeecoPostDetail: Equatable {
     let nickname: String
     let date: String
     let body: String
+    let bodyBlocks: [MeecoPostBodyBlock]
     let media: [MeecoMedia]
     let comments: [MeecoComment]
     let dealInfo: MeecoDealInfo?
+}
+
+struct MeecoPostBodyBlock: Identifiable, Equatable {
+    enum Content: Equatable {
+        case text(String)
+        case linkPreview(MeecoMedia)
+    }
+
+    let id: Int
+    let content: Content
 }
 
 struct MeecoDealInfo: Equatable {
@@ -938,6 +967,7 @@ struct BoardView: View {
     @StateObject private var viewModel: BoardViewModel
     @State private var webAction: MeecoWebAction?
     @State private var searchText = ""
+    @AppStorage("favoriteBoardIDs") private var favoriteBoardIDsStorage = ""
     private let refreshTimer = Timer.publish(every: 120, on: .main, in: .common).autoconnect()
 
     init(board: MeecoBoard) {
@@ -1033,6 +1063,15 @@ struct BoardView: View {
         .hideRootTabBar()
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
+                Button {
+                    toggleFavoriteBoard()
+                } label: {
+                    Image(systemName: isFavoriteBoard ? "star.fill" : "star")
+                }
+                .accessibilityLabel(isFavoriteBoard ? "즐겨찾기 해제" : "즐겨찾기 추가")
+            }
+
+            ToolbarItem(placement: .primaryAction) {
                 Menu {
                     Button {
                         webAction = MeecoWebAction(title: "글쓰기", url: board.writeURL(category: viewModel.selectedCategory))
@@ -1101,6 +1140,20 @@ struct BoardView: View {
             url: board.searchURL(query: searchText, category: viewModel.selectedCategory)
         )
     }
+
+    private var isFavoriteBoard: Bool {
+        favoriteBoardIDsStorage.boardIDSet.contains(board.id)
+    }
+
+    private func toggleFavoriteBoard() {
+        var favoriteIDs = favoriteBoardIDsStorage.boardIDSet
+        if favoriteIDs.contains(board.id) {
+            favoriteIDs.remove(board.id)
+        } else {
+            favoriteIDs.insert(board.id)
+        }
+        favoriteBoardIDsStorage = favoriteIDs.boardIDStorageValue
+    }
 }
 
 struct BoardBottomActionBar: View {
@@ -1131,6 +1184,7 @@ struct BoardBottomActionBar: View {
             .padding(.horizontal, 14)
             .frame(height: 50)
             .boardLiquidGlass(cornerRadius: 25)
+            .shadow(color: .black.opacity(0.12), radius: 18, y: 8)
 
             Button(action: onCompose) {
                 Image(systemName: "square.and.pencil")
@@ -1139,6 +1193,7 @@ struct BoardBottomActionBar: View {
             }
             .frame(width: 50, height: 50)
             .boardLiquidGlassButton()
+            .shadow(color: .black.opacity(0.14), radius: 18, y: 8)
             .accessibilityLabel("글쓰기")
         }
         .padding(.horizontal, 16)
@@ -1429,6 +1484,9 @@ struct TopUpvotedPostRow: View {
 struct MediaStack: View {
     let media: [MeecoMedia]
     var onImageTap: (MeecoMedia) -> Void = { _ in }
+    var onLinkTap: ((MeecoMedia) -> Void)?
+
+    @Environment(\.openURL) private var openURL
 
     var body: some View {
         if !media.isEmpty {
@@ -1471,7 +1529,13 @@ struct MediaStack: View {
                 .frame(minHeight: 220)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
         case .linkPreview:
-            Link(destination: item.url) {
+            Button {
+                if let onLinkTap {
+                    onLinkTap(item)
+                } else {
+                    openURL(item.url)
+                }
+            } label: {
                 LinkPreviewCard(media: item)
             }
             .buttonStyle(.plain)
@@ -1805,16 +1869,21 @@ private extension View {
     func boardLiquidGlass(cornerRadius: CGFloat) -> some View {
 #if os(iOS)
         if #available(iOS 26.0, *) {
-            self.glassEffect(.regular.interactive(), in: .rect(cornerRadius: cornerRadius))
+            self
+                .glassEffect(.regular.tint(.white.opacity(0.14)).interactive(), in: .rect(cornerRadius: cornerRadius))
+                .shadow(color: .white.opacity(0.16), radius: 10, y: -2)
+                .shadow(color: .black.opacity(0.10), radius: 18, y: 8)
         } else {
             self
-                .background(.bar)
+                .background(.ultraThinMaterial)
                 .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
+                .shadow(color: .black.opacity(0.10), radius: 18, y: 8)
         }
 #else
         self
-            .background(.bar)
+            .background(.ultraThinMaterial)
             .clipShape(RoundedRectangle(cornerRadius: cornerRadius))
+            .shadow(color: .black.opacity(0.10), radius: 18, y: 8)
 #endif
     }
 
@@ -1824,18 +1893,22 @@ private extension View {
         if #available(iOS 26.0, *) {
             self
                 .buttonStyle(.plain)
-                .glassEffect(.regular.interactive(), in: Circle())
+                .glassEffect(.regular.tint(.white.opacity(0.18)).interactive(), in: Circle())
                 .clipShape(Circle())
+                .shadow(color: .white.opacity(0.18), radius: 8, y: -2)
+                .shadow(color: .black.opacity(0.14), radius: 18, y: 8)
         } else {
             self
                 .buttonStyle(.bordered)
-                .background(.bar)
+                .background(.ultraThinMaterial)
                 .clipShape(Circle())
+                .shadow(color: .black.opacity(0.14), radius: 18, y: 8)
         }
 #else
         self
             .buttonStyle(.bordered)
             .clipShape(Circle())
+            .shadow(color: .black.opacity(0.14), radius: 18, y: 8)
 #endif
     }
 
@@ -2021,14 +2094,20 @@ struct PostDetailView: View {
                     }
                 }
 
-                Text(detail.body)
-                    .font(.body)
-                    .lineSpacing(5)
-                    .textSelection(.enabled)
+                PostBodyBlocksView(
+                    blocks: detail.bodyBlocks,
+                    fallbackBody: detail.body,
+                    onLinkTap: { media in
+                        webAction = MeecoWebAction(title: media.url.previewTitle, url: media.url)
+                    }
+                )
 
-                MediaStack(media: detail.media) { media in
-                    selectedImage = media
-                }
+                MediaStack(
+                    media: detail.media.filter { $0.kind != .linkPreview },
+                    onImageTap: { media in
+                        selectedImage = media
+                    }
+                )
 
                 if !detail.comments.isEmpty {
                     CommentsHeader(count: detail.comments.count)
@@ -2043,6 +2122,40 @@ struct PostDetailView: View {
             .padding()
             .padding(.bottom, 76)
             .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+
+struct PostBodyBlocksView: View {
+    let blocks: [MeecoPostBodyBlock]
+    let fallbackBody: String
+    let onLinkTap: (MeecoMedia) -> Void
+
+    var body: some View {
+        if blocks.isEmpty {
+            Text(fallbackBody)
+                .font(.body)
+                .lineSpacing(5)
+                .textSelection(.enabled)
+        } else {
+            VStack(alignment: .leading, spacing: 12) {
+                ForEach(blocks) { block in
+                    switch block.content {
+                    case .text(let text):
+                        Text(text)
+                            .font(.body)
+                            .lineSpacing(5)
+                            .textSelection(.enabled)
+                    case .linkPreview(let media):
+                        Button {
+                            onLinkTap(media)
+                        } label: {
+                            LinkPreviewCard(media: media)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
         }
     }
 }
@@ -2661,6 +2774,7 @@ struct MeecoHTMLParser {
         let title = bestTitle(from: html, fallbackTitle: fallbackPost.title)
         let bodyHTML = firstContentBlock(in: html) ?? ""
         let body = bodyWithoutLeadingTitle(bodyHTML.displayText.nonEmpty ?? html.displayText, title: title)
+        let bodyBlocks = postBodyBlocks(from: bodyHTML, title: title, baseURL: fallbackPost.url)
         let media = mediaItems(from: bodyHTML, baseURL: fallbackPost.url)
         let comments = comments(from: html, baseURL: fallbackPost.url, postAuthorNickname: fallbackPost.nickname)
         let dealInfo = fallbackPost.boardPath == "Price"
@@ -2672,6 +2786,7 @@ struct MeecoHTMLParser {
             nickname: fallbackPost.nickname,
             date: fallbackPost.date,
             body: body,
+            bodyBlocks: bodyBlocks,
             media: media,
             comments: comments,
             dealInfo: dealInfo
@@ -3270,6 +3385,72 @@ struct MeecoHTMLParser {
         return lines.dropFirst().joined(separator: "\n").nonEmpty ?? body
     }
 
+    private func postBodyBlocks(from html: String, title: String, baseURL: URL) -> [MeecoPostBodyBlock] {
+        guard !html.isEmpty else { return [] }
+
+        let pattern = #"<iframe\b([^>]*)>|<a\s+([^>]*\bhref\s*=\s*["']([^"']+)["'][^>]*)>(.*?)</a>"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive, .dotMatchesLineSeparators]) else {
+            return []
+        }
+
+        let nsHTML = html as NSString
+        let matches = regex.matches(in: html, range: NSRange(location: 0, length: nsHTML.length))
+        var blocks: [MeecoPostBodyBlock] = []
+        var lastLocation = 0
+        var didTrimLeadingTitle = false
+
+        func appendText(from range: NSRange) {
+            guard range.location != NSNotFound, range.length > 0 else { return }
+            var text = nsHTML.substring(with: range).displayText
+            if !didTrimLeadingTitle {
+                text = bodyWithoutLeadingTitle(text, title: title)
+                didTrimLeadingTitle = true
+            }
+            guard !text.isEmpty else { return }
+            blocks.append(MeecoPostBodyBlock(id: blocks.count, content: .text(text)))
+        }
+
+        func appendLinkPreview(url: URL, altText: String) -> Bool {
+            guard url.isPreviewableLink else { return false }
+            let media = MeecoMedia(
+                id: url,
+                url: url,
+                altText: altText.nonEmpty ?? url.previewTitle,
+                kind: .linkPreview
+            )
+            blocks.append(MeecoPostBodyBlock(id: blocks.count, content: .linkPreview(media)))
+            return true
+        }
+
+        for match in matches {
+            appendText(from: NSRange(location: lastLocation, length: match.range.location - lastLocation))
+
+            var didAppendPreview = false
+            if match.range(at: 1).location != NSNotFound {
+                let attributes = nsHTML.substring(with: match.range(at: 1))
+                if let src = attributeValue(named: "src", in: attributes)?.nonEmpty,
+                   let url = URL(string: src, relativeTo: baseURL)?.absoluteURL {
+                    didAppendPreview = appendLinkPreview(url: url, altText: url.previewTitle)
+                }
+            } else if match.range(at: 3).location != NSNotFound {
+                let href = nsHTML.substring(with: match.range(at: 3)).htmlDecoded
+                let label = match.range(at: 4).location == NSNotFound ? "" : nsHTML.substring(with: match.range(at: 4)).plainHTMLText
+                if let url = URL(string: href, relativeTo: baseURL)?.absoluteURL {
+                    didAppendPreview = appendLinkPreview(url: url, altText: label)
+                }
+            }
+
+            if !didAppendPreview {
+                appendText(from: match.range)
+            }
+
+            lastLocation = match.range.location + match.range.length
+        }
+
+        appendText(from: NSRange(location: lastLocation, length: nsHTML.length - lastLocation))
+        return blocks
+    }
+
     private func firstContentBlock(in html: String) -> String? {
         let patterns = [
             #"<!--BeforeDocument\([^)]*\)-->(.*?)<!--AfterDocument"#,
@@ -3645,6 +3826,10 @@ private struct ParsedComment {
 }
 
 private extension String {
+    var boardIDSet: Set<String> {
+        Set(split(separator: ",").map(String.init).filter { !$0.isEmpty })
+    }
+
     var plainHTMLText: String {
         replacingOccurrences(of: #"<script\b[^>]*>.*?</script>"#, with: " ", options: [.regularExpression, .caseInsensitive])
             .replacingOccurrences(of: #"<style\b[^>]*>.*?</style>"#, with: " ", options: [.regularExpression, .caseInsensitive])
@@ -3777,6 +3962,12 @@ private extension String {
     }
 }
 
+private extension Set where Element == String {
+    var boardIDStorageValue: String {
+        sorted().joined(separator: ",")
+    }
+}
+
 private extension URL {
     var normalizedHost: String {
         (host ?? "").lowercased().replacingOccurrences(of: "www.", with: "")
@@ -3792,6 +3983,9 @@ private extension URL {
             || host == "twitter.com"
             || host == "instagram.com"
             || host == "threads.net"
+            || host == "facebook.com"
+            || host == "m.facebook.com"
+            || host == "fb.watch"
     }
 
     var previewTitle: String {
@@ -3804,6 +3998,8 @@ private extension URL {
             return "Instagram"
         case "threads.net":
             return "Threads"
+        case "facebook.com", "m.facebook.com", "fb.watch":
+            return "Facebook"
         default:
             return host ?? absoluteString
         }
@@ -3817,6 +4013,8 @@ private extension URL {
             return "camera.fill"
         case "x.com", "twitter.com", "threads.net":
             return "quote.bubble.fill"
+        case "facebook.com", "m.facebook.com", "fb.watch":
+            return "f.circle.fill"
         default:
             return "link"
         }

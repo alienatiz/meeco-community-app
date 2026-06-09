@@ -1023,6 +1023,44 @@ final class meecoTests: XCTestCase {
         XCTAssertEqual(detail.comments.first?.media.map(\.url.absoluteString), ["https://meeco.kr/files/attach/images/123/comment.jpg"])
     }
 
+    func testParserKeepsSocialLinksInPostBodyOrder() throws {
+        let post = MeecoPost(
+            id: URL(string: "https://meeco.kr/mini/41482344")!,
+            documentID: "41482344",
+            title: "SNS 위치 테스트",
+            nickname: "작성자",
+            date: "26.06.05",
+            url: URL(string: "https://meeco.kr/mini/41482344")!,
+            boardPath: "mini",
+            category: "미니",
+            commentCount: nil,
+            upvoteCount: 0,
+            isNotice: false,
+            isHot: false
+        )
+        let html = """
+        <meta property=\"og:title\" content=\"SNS 위치 테스트 - 미코\" />
+        <div class=\"xe_content\">
+            <p>첫 문단입니다.</p>
+            <p><a href=\"https://x.com/meeco/status/1\">X 원문</a></p>
+            <p>중간 설명입니다.</p>
+            <p><a href=\"https://www.facebook.com/meeco/posts/2\">Facebook 원문</a></p>
+            <p><a href=\"https://meeco.kr/notice\">일반 링크</a></p>
+            <p>마지막 문단입니다.</p>
+        </div>
+        """
+
+        let detail = MeecoHTMLParser().postDetail(from: html, fallbackPost: post)
+
+        XCTAssertEqual(detail.bodyBlocks.count, 6)
+        XCTAssertEqual(detail.bodyBlocks[0].content, .text("첫 문단입니다."))
+        XCTAssertEqual(detail.bodyBlocks[1].content, .linkPreview(MeecoMedia(id: URL(string: "https://x.com/meeco/status/1")!, url: URL(string: "https://x.com/meeco/status/1")!, altText: "X 원문", kind: .linkPreview)))
+        XCTAssertEqual(detail.bodyBlocks[2].content, .text("중간 설명입니다."))
+        XCTAssertEqual(detail.bodyBlocks[3].content, .linkPreview(MeecoMedia(id: URL(string: "https://www.facebook.com/meeco/posts/2")!, url: URL(string: "https://www.facebook.com/meeco/posts/2")!, altText: "Facebook 원문", kind: .linkPreview)))
+        XCTAssertEqual(detail.bodyBlocks[4].content, .text("일반 링크"))
+        XCTAssertEqual(detail.bodyBlocks[5].content, .text("마지막 문단입니다."))
+    }
+
     func testParserMarksReplyCommentsWithDepth() throws {
         let post = MeecoPost(
             id: URL(string: "https://meeco.kr/mini/41484658")!,
