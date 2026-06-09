@@ -119,6 +119,14 @@ struct BoardDirectoryView: View {
             }
         }
         .navigationTitle(title)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                NavigationLink(destination: NotificationCenterView().hideRootTabBar()) {
+                    Image(systemName: "bell")
+                }
+                .accessibilityLabel("알림")
+            }
+        }
         .showRootTabBar()
         .safeAreaInset(edge: .bottom) {
             RootNavigationBar(selectedTab: $selectedTab, onSearch: onSearch)
@@ -801,6 +809,21 @@ struct MeecoAttendanceRecord: Identifiable, Equatable {
     let message: String
     let time: String
     let points: Int?
+}
+
+struct MeecoNotificationSnapshot: Equatable {
+    let unreadCount: Int
+    let notifications: [MeecoNotification]
+    let fetchedAt: Date
+}
+
+struct MeecoNotification: Identifiable, Equatable {
+    let id: String
+    let title: String
+    let body: String
+    let date: String
+    let url: URL?
+    let isUnread: Bool
 }
 
 @MainActor
@@ -2814,6 +2837,193 @@ final class AttendanceViewModel: ObservableObject {
     }
 }
 
+@MainActor
+final class NotificationCenterViewModel: ObservableObject {
+    enum LoadingState: Equatable {
+        case idle
+        case loading
+        case loaded
+        case failed(String)
+    }
+
+    @Published private(set) var snapshot: MeecoNotificationSnapshot?
+    @Published private(set) var state: LoadingState = .idle
+
+    private let service: MeecoService
+
+    init(service: MeecoService = MeecoService()) {
+        self.service = service
+    }
+
+    func load() async {
+        guard state != .loading else { return }
+        state = .loading
+        do {
+            snapshot = try await service.fetchNotificationSnapshot()
+            state = .loaded
+        } catch {
+            state = .failed(error.localizedDescription)
+        }
+    }
+}
+
+struct NotificationCenterView: View {
+    @EnvironmentObject private var authSession: MeecoAuthSession
+    @StateObject private var viewModel = NotificationCenterViewModel()
+    @State private var webAction: MeecoWebAction?
+
+    var body: some View {
+        List {
+            Section("알림") {
+                switch authSession.status {
+                case .unknown, .checking:
+                    HStack {
+                        ProgressView()
+                        Text("로그인 상태 확인 중")
+                    }
+                case .loggedOut, .failed:
+                    VStack(alignment: .leading, spacing: 10) {
+                        Label("로그인이 필요합니다", systemImage: "bell.badge")
+                            .font(.headline)
+                        Text("댓글, 답글, 추천 등 내 알림은 미코 계정 로그인 후 확인할 수 있습니다.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        NavigationLink(destination: AccountSettingsView().hideRootTabBar()) {
+                            Label("로그인", systemImage: "person.crop.circle.fill")
+                        }
+                    }
+                    .padding(.vertical, 4)
+                case .loggedIn:
+                    notificationStatusContent
+                }
+            }
+
+            if let snapshot = viewModel.snapshot, !snapshot.notifications.isEmpty {
+                Section("최근 알림") {
+                    ForEach(snapshot.notifications) { notification in
+                        Button {
+                            if let url = notification.url {
+                                webAction = MeecoWebAction(title: "알림", url: url)
+                            }
+                        } label: {
+                            NotificationRow(notification: notification)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(notification.url == nil)
+                    }
+                }
+            }
+        }
+        .navigationTitle("알림")
+#if os(iOS)
+        .navigationBarTitleDisplayMode(.inline)
+#endif
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    Task { await viewModel.load() }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .disabled(viewModel.state == .loading || !authSession.isLoggedIn)
+                .accessibilityLabel("새로고침")
+            }
+        }
+        .sheet(item: $webAction) { action in
+            WebActionView(action: action)
+        }
+        .task {
+            await authSession.verifySession()
+            if authSession.isLoggedIn {
+                await viewModel.load()
+            }
+        }
+        .refreshable {
+            if authSession.isLoggedIn {
+                await viewModel.load()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var notificationStatusContent: some View {
+        if viewModel.snapshot == nil && (viewModel.state == .idle || viewModel.state == .loading) {
+            HStack {
+                ProgressView()
+                Text("알림을 불러오는 중")
+            }
+        } else {
+            switch viewModel.state {
+            case .failed(let message):
+                VStack(alignment: .leading, spacing: 10) {
+                    Label("알림을 불러오지 못했습니다", systemImage: "exclamationmark.triangle")
+                        .font(.headline)
+                    Text(message)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Button {
+                        Task { await viewModel.load() }
+                    } label: {
+                        Label("다시 시도", systemImage: "arrow.clockwise")
+                    }
+                    .buttonStyle(.bordered)
+                }
+                .padding(.vertical, 4)
+            default:
+                if let snapshot = viewModel.snapshot {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label(
+                            snapshot.unreadCount > 0 ? "읽지 않은 알림 \(snapshot.unreadCount)개" : "새 알림 없음",
+                            systemImage: snapshot.unreadCount > 0 ? "bell.badge.fill" : "bell"
+                        )
+                        .font(.headline)
+                        .foregroundColor(snapshot.unreadCount > 0 ? .accentColor : .secondary)
+
+                        Text("최근 업데이트 \(snapshot.fetchedAt.formatted(date: .omitted, time: .shortened))")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
+        }
+    }
+}
+
+struct NotificationRow: View {
+    let notification: MeecoNotification
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: notification.isUnread ? "bell.badge.fill" : "bell")
+                .foregroundColor(notification.isUnread ? .accentColor : .secondary)
+                .frame(width: 24, height: 24)
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(notification.title)
+                        .font(.subheadline.weight(notification.isUnread ? .bold : .semibold))
+                        .foregroundColor(.primary)
+                        .lineLimit(2)
+                    Spacer(minLength: 8)
+                    Text(notification.date)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                }
+
+                if !notification.body.isEmpty {
+                    Text(notification.body)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .lineLimit(2)
+                }
+            }
+        }
+        .padding(.vertical, 4)
+    }
+}
+
 struct AttendanceView: View {
     @EnvironmentObject private var authSession: MeecoAuthSession
     @StateObject private var viewModel = AttendanceViewModel()
@@ -3205,6 +3415,7 @@ struct MeecoService {
 
     static let loginFormURL = URL(string: "https://meeco.kr/index.php?act=dispMemberLoginForm")!
     static let attendanceURL = URL(string: "https://meeco.kr/attendance")!
+    static let notificationURL = URL(string: "https://meeco.kr/index.php?act=dispNcenterliteNotifyList")!
 
     private let parser = MeecoHTMLParser()
     private let boardSnapshotFetcher: BoardSnapshotFetcher?
@@ -3240,6 +3451,12 @@ struct MeecoService {
         await syncWebViewCookiesToSharedStorage()
         let html = try await fetchHTML(from: cacheBypassedURL(from: Self.attendanceURL), validatesStatus: false)
         return parser.attendanceSnapshot(from: html)
+    }
+
+    func fetchNotificationSnapshot() async throws -> MeecoNotificationSnapshot {
+        await syncWebViewCookiesToSharedStorage()
+        let html = try await fetchHTML(from: cacheBypassedURL(from: Self.notificationURL), validatesStatus: false)
+        return parser.notificationSnapshot(from: html, baseURL: Self.notificationURL)
     }
 
     func fetchLoginForm() async throws -> MeecoLoginForm {
@@ -3522,6 +3739,16 @@ struct MeecoHTMLParser {
         )
     }
 
+    func notificationSnapshot(from html: String, baseURL: URL) -> MeecoNotificationSnapshot {
+        let notifications = notificationItems(from: html, baseURL: baseURL)
+        let unreadCount = unreadNotificationCount(from: html) ?? notifications.filter(\.isUnread).count
+        return MeecoNotificationSnapshot(
+            unreadCount: unreadCount,
+            notifications: notifications,
+            fetchedAt: Date()
+        )
+    }
+
     private func priceDealInfo(from html: String, bodyHTML: String, baseURL: URL, fallbackTitle: String) -> MeecoDealInfo? {
         let rows = priceExtraRows(from: html)
         let explicitStatus = rows
@@ -3533,6 +3760,102 @@ struct MeecoHTMLParser {
 
         guard inferredStatus != nil || !links.isEmpty else { return nil }
         return MeecoDealInfo(status: inferredStatus, links: links)
+    }
+
+    private func unreadNotificationCount(from html: String) -> Int? {
+        let text = html.plainHTMLText
+        let patterns = [
+            #"읽지\s*않은\s*알림\s*(\d+)"#,
+            #"새\s*알림\s*(\d+)"#,
+            #"unread\s*(\d+)"#
+        ]
+
+        return patterns
+            .lazy
+            .compactMap { text.firstMatch(pattern: $0, options: [.caseInsensitive]).flatMap(Int.init) }
+            .first
+    }
+
+    private func notificationItems(from html: String, baseURL: URL) -> [MeecoNotification] {
+        let listItems = html.matches(
+            pattern: #"<li\b([^>]*)>(.*?)</li>"#,
+            options: [.caseInsensitive, .dotMatchesLineSeparators]
+        )
+        .compactMap { match -> MeecoNotification? in
+            guard match.count > 2 else { return nil }
+            return notificationItem(attributes: match[1], bodyHTML: match[2], baseURL: baseURL)
+        }
+
+        if !listItems.isEmpty {
+            return uniqueNotifications(listItems)
+        }
+
+        let tableRows = html.matches(
+            pattern: #"<tr\b([^>]*)>(.*?)</tr>"#,
+            options: [.caseInsensitive, .dotMatchesLineSeparators]
+        )
+        .compactMap { match -> MeecoNotification? in
+            guard match.count > 2 else { return nil }
+            return notificationItem(attributes: match[1], bodyHTML: match[2], baseURL: baseURL)
+        }
+
+        return uniqueNotifications(tableRows)
+    }
+
+    private func notificationItem(attributes: String, bodyHTML: String, baseURL: URL) -> MeecoNotification? {
+        let plainText = bodyHTML.plainHTMLText
+        guard !plainText.isEmpty else { return nil }
+        guard plainText.localizedCaseInsensitiveContains("알림")
+            || bodyHTML.localizedCaseInsensitiveContains("notify")
+            || bodyHTML.localizedCaseInsensitiveContains("ncenter")
+            || bodyHTML.localizedCaseInsensitiveContains("comment")
+            || bodyHTML.localizedCaseInsensitiveContains("reply") else {
+            return nil
+        }
+
+        let link = bodyHTML.matches(
+            pattern: #"<a\s+([^>]*\bhref\s*=\s*[\"']([^\"']+)[\"'][^>]*)>(.*?)</a>"#,
+            options: [.caseInsensitive, .dotMatchesLineSeparators]
+        )
+        .compactMap { match -> (url: URL, title: String)? in
+            guard match.count > 3,
+                  let url = URL(string: match[2].htmlDecoded, relativeTo: baseURL)?.absoluteURL else {
+                return nil
+            }
+            return (url, match[3].plainHTMLText)
+        }
+        .first
+
+        let date = plainText.firstMatch(
+            pattern: #"(20\d{2}[./-]\d{1,2}[./-]\d{1,2}\.?\s*\d{0,2}:?\d{0,2}|\d{2}[./-]\d{1,2}[./-]\d{1,2}\.?\s*\d{0,2}:?\d{0,2}|\d{1,2}:\d{2}|방금\s*전|\d+\s*(?:분|시간|일)\s*전)"#
+        ) ?? ""
+        let title = link?.title.nonEmpty
+            ?? plainText.components(separatedBy: date).first?.trimmingCharacters(in: .whitespacesAndNewlines).nonEmpty
+            ?? "알림"
+        let body = plainText
+            .replacingOccurrences(of: title, with: "")
+            .replacingOccurrences(of: date, with: "")
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let unread = attributes.localizedCaseInsensitiveContains("unread")
+            || attributes.localizedCaseInsensitiveContains("new")
+            || bodyHTML.localizedCaseInsensitiveContains("unread")
+            || bodyHTML.localizedCaseInsensitiveContains("new")
+            || bodyHTML.localizedCaseInsensitiveContains("is_read\">N")
+
+        return MeecoNotification(
+            id: link?.url.absoluteString ?? plainText,
+            title: title,
+            body: body,
+            date: date,
+            url: link?.url,
+            isUnread: unread
+        )
+    }
+
+    private func uniqueNotifications(_ notifications: [MeecoNotification]) -> [MeecoNotification] {
+        var seen = Set<String>()
+        return notifications.filter { seen.insert($0.id).inserted }
     }
 
     private func attendanceCheckedIn(from text: String) -> Bool {

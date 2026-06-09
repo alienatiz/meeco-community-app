@@ -872,6 +872,38 @@ final class meecoTests: XCTestCase {
         XCTAssertEqual(snapshot.records[0].points, 10)
     }
 
+    func testParserReadsNotificationSnapshot() throws {
+        let html = """
+        <div class="ncenter">
+            <p>읽지 않은 알림 2</p>
+            <ul>
+                <li class="unread notify">
+                    <a href="/index.php?act=procNcenterliteRedirect&amp;notify=abc">내 글에 댓글이 달렸습니다</a>
+                    <span>방금 전</span>
+                </li>
+                <li class="notify">
+                    <a href="/mini/41490040#comment">답글이 등록되었습니다</a>
+                    <time>26.06.09</time>
+                </li>
+            </ul>
+        </div>
+        """
+
+        let snapshot = MeecoHTMLParser().notificationSnapshot(
+            from: html,
+            baseURL: URL(string: "https://meeco.kr/index.php?act=dispNcenterliteNotifyList")!
+        )
+
+        XCTAssertEqual(snapshot.unreadCount, 2)
+        XCTAssertEqual(snapshot.notifications.count, 2)
+        XCTAssertEqual(snapshot.notifications[0].title, "내 글에 댓글이 달렸습니다")
+        XCTAssertEqual(snapshot.notifications[0].date, "방금 전")
+        XCTAssertEqual(snapshot.notifications[0].isUnread, true)
+        XCTAssertEqual(snapshot.notifications[0].url?.absoluteString, "https://meeco.kr/index.php?act=procNcenterliteRedirect&notify=abc")
+        XCTAssertEqual(snapshot.notifications[1].title, "답글이 등록되었습니다")
+        XCTAssertEqual(snapshot.notifications[1].isUnread, false)
+    }
+
     func testParserLoadsPostDetailContent() throws {
         let post = MeecoPost(
             id: URL(string: "https://meeco.kr/mini/41481365")!,
