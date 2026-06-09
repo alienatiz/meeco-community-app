@@ -155,48 +155,98 @@ struct RootNavigationBar: View {
     let onSearch: () -> Void
 
     var body: some View {
-        BottomControlBackdrop {
-            HStack(spacing: 12) {
-                HStack(spacing: 4) {
-                    ForEach(MeecoAppTab.allCases) { tab in
-                        Button {
-                            selectedTab = tab
-                        } label: {
-                            VStack(spacing: 3) {
-                                Image(systemName: tab.systemImage)
-                                    .font(.title3.weight(selectedTab == tab ? .bold : .semibold))
-                                Text(tab.title)
-                                    .font(.caption.weight(selectedTab == tab ? .bold : .semibold))
-                            }
-                            .foregroundColor(selectedTab == tab ? .accentColor : .secondary)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 58)
-                        }
-                        .buttonStyle(.plain)
-                        .frame(maxWidth: .infinity)
-                        .accessibilityLabel(tab.title)
-                    }
-                }
+        HStack(spacing: 12) {
+            rootTabGroup
                 .padding(.horizontal, 8)
                 .frame(maxWidth: .infinity)
-                .frame(height: 64)
-                .boardLiquidGlass(cornerRadius: 32)
+                .frame(height: 66)
+                .boardLiquidGlass(cornerRadius: 33)
 
-                Button(action: onSearch) {
-                    Image(systemName: "magnifyingglass")
-                        .font(.title2.weight(.bold))
-                        .foregroundColor(.white)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
-                .frame(width: 66, height: 66)
-                .rootProminentLiquidGlassButton()
-                .shadow(color: Color.accentColor.opacity(0.28), radius: 16, y: 6)
-                .accessibilityLabel("검색")
+            Button(action: onSearch) {
+                Image(systemName: "magnifyingglass")
+                    .font(.title2.weight(.bold))
+                    .foregroundColor(.primary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
+            .frame(width: 66, height: 66)
+            .boardLiquidGlassButton()
+            .accessibilityLabel("검색")
+        }
             .padding(.horizontal, 16)
             .padding(.top, 8)
             .padding(.bottom, 10)
+    }
+
+    @ViewBuilder
+    private var rootTabGroup: some View {
+        tabButtons
+    }
+
+    private var tabButtons: some View {
+        HStack(spacing: 3) {
+            ForEach(MeecoAppTab.allCases) { tab in
+                let isSelected = selectedTab == tab
+                Button {
+                    withAnimation(.spring(response: 0.34, dampingFraction: 0.78)) {
+                        selectedTab = tab
+                    }
+                } label: {
+                    RootTabLabel(tab: tab, isSelected: isSelected)
+                        .rootTabSelectionHighlight(isSelected: isSelected)
+                }
+                .buttonStyle(RootTabButtonStyle(isSelected: isSelected))
+                .frame(maxWidth: .infinity)
+                .accessibilityLabel(tab.title)
+                .accessibilityAddTraits(isSelected ? .isSelected : [])
+            }
         }
+    }
+}
+
+struct RootTabLabel: View {
+    let title: String
+    let systemImage: String
+    let isSelected: Bool
+
+    init(tab: MeecoAppTab, isSelected: Bool) {
+        self.title = tab.title
+        self.systemImage = tab.systemImage
+        self.isSelected = isSelected
+    }
+
+    init(title: String, systemImage: String, isSelected: Bool) {
+        self.title = title
+        self.systemImage = systemImage
+        self.isSelected = isSelected
+    }
+
+    var body: some View {
+        VStack(spacing: 2) {
+            Image(systemName: systemImage)
+                .symbolVariant(isSelected ? .fill : .none)
+                .font(.system(size: 20, weight: isSelected ? .bold : .semibold))
+                .frame(height: 23)
+
+            Text(title)
+                .font(.caption.weight(isSelected ? .bold : .semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+        }
+        .foregroundColor(isSelected ? .primary : .secondary)
+        .frame(maxWidth: .infinity)
+        .frame(height: 56)
+        .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+    }
+}
+
+struct RootTabButtonStyle: ButtonStyle {
+    let isSelected: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.92 : 1.0)
+            .opacity(configuration.isPressed && !isSelected ? 0.72 : 1)
+            .animation(.spring(response: 0.22, dampingFraction: 0.72), value: configuration.isPressed)
     }
 }
 
@@ -2087,7 +2137,11 @@ private extension View {
 #if os(iOS)
         if #available(iOS 26.0, *) {
             self
-                .glassEffect(.regular.tint(.white.opacity(0.14)).interactive(), in: .rect(cornerRadius: cornerRadius))
+                .glassEffect(.regular.tint(.white.opacity(0.07)).interactive(), in: .rect(cornerRadius: cornerRadius))
+                .overlay {
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .stroke(.white.opacity(0.20), lineWidth: 0.8)
+                }
                 .shadow(color: .white.opacity(0.16), radius: 10, y: -2)
                 .shadow(color: .black.opacity(0.10), radius: 18, y: 8)
         } else {
@@ -2149,6 +2203,22 @@ private extension View {
             .background(Color.accentColor)
             .clipShape(Circle())
 #endif
+    }
+
+    @ViewBuilder
+    func rootTabSelectionHighlight(isSelected: Bool) -> some View {
+        self
+            .background {
+                if isSelected {
+                    RoundedRectangle(cornerRadius: 24, style: .continuous)
+                        .fill(.white.opacity(0.12))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                                .stroke(.white.opacity(0.22), lineWidth: 0.7)
+                        }
+                        .shadow(color: .black.opacity(0.06), radius: 8, y: 3)
+                }
+            }
     }
 
     @ViewBuilder
