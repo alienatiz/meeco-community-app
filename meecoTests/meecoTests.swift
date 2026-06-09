@@ -877,6 +877,10 @@ final class meecoTests: XCTestCase {
         <div class="ncenter">
             <p>읽지 않은 알림 2</p>
             <ul>
+                <li class="notify">
+                    <a href="/mini/41490039#comment">이미 읽은 알림입니다</a>
+                    <time>26.06.08</time>
+                </li>
                 <li class="unread notify">
                     <a href="/index.php?act=procNcenterliteRedirect&amp;notify=abc">내 글에 댓글이 달렸습니다</a>
                     <span>방금 전</span>
@@ -895,13 +899,14 @@ final class meecoTests: XCTestCase {
         )
 
         XCTAssertEqual(snapshot.unreadCount, 2)
-        XCTAssertEqual(snapshot.notifications.count, 2)
+        XCTAssertEqual(snapshot.notifications.count, 3)
         XCTAssertEqual(snapshot.notifications[0].title, "내 글에 댓글이 달렸습니다")
         XCTAssertEqual(snapshot.notifications[0].date, "방금 전")
         XCTAssertEqual(snapshot.notifications[0].isUnread, true)
         XCTAssertEqual(snapshot.notifications[0].url?.absoluteString, "https://meeco.kr/index.php?act=procNcenterliteRedirect&notify=abc")
         XCTAssertEqual(snapshot.notifications[1].title, "답글이 등록되었습니다")
         XCTAssertEqual(snapshot.notifications[1].isUnread, false)
+        XCTAssertEqual(snapshot.notifications[2].title, "이미 읽은 알림입니다")
     }
 
     func testParserLoadsPostDetailContent() throws {

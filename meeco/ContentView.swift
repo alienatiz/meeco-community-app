@@ -13,6 +13,7 @@ struct ContentView: View {
     @State private var selectedTab: MeecoAppTab = .main
     @State private var webAction: MeecoWebAction?
     @StateObject private var authSession = MeecoAuthSession()
+    @StateObject private var notificationCenter = NotificationCenterViewModel()
     @AppStorage("favoriteBoardIDs") private var favoriteBoardIDsStorage = ""
 
     var body: some View {
@@ -25,11 +26,15 @@ struct ContentView: View {
             )
         }
         .environmentObject(authSession)
+        .environmentObject(notificationCenter)
         .sheet(item: $webAction) { action in
             WebActionView(action: action)
         }
         .task {
             await authSession.verifySession()
+            if authSession.isLoggedIn {
+                await notificationCenter.load()
+            }
         }
     }
 
@@ -83,6 +88,7 @@ struct BoardDirectoryView: View {
     let title: String
     @Binding var selectedTab: MeecoAppTab
     let onSearch: () -> Void
+    @EnvironmentObject private var notificationCenter: NotificationCenterViewModel
 
     var body: some View {
         Group {
@@ -122,7 +128,7 @@ struct BoardDirectoryView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 NavigationLink(destination: NotificationCenterView().hideRootTabBar()) {
-                    Image(systemName: "bell")
+                    NotificationToolbarIcon(unreadCount: notificationCenter.unreadCount)
                 }
                 .accessibilityLabel("알림")
             }
@@ -130,6 +136,29 @@ struct BoardDirectoryView: View {
         .showRootTabBar()
         .safeAreaInset(edge: .bottom) {
             RootNavigationBar(selectedTab: $selectedTab, onSearch: onSearch)
+        }
+    }
+}
+
+struct NotificationToolbarIcon: View {
+    let unreadCount: Int
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            Image(systemName: unreadCount > 0 ? "bell.badge" : "bell")
+
+            if unreadCount > 0 {
+                Text(unreadCount > 99 ? "99+" : "\(unreadCount)")
+                    .font(.caption2.weight(.bold))
+                    .foregroundColor(.white)
+                    .monospacedDigit()
+                    .padding(.horizontal, 5)
+                    .frame(minWidth: 18, minHeight: 18)
+                    .background(Color.red)
+                    .clipShape(Capsule())
+                    .offset(x: 9, y: -9)
+                    .accessibilityHidden(true)
+            }
         }
     }
 }
@@ -2855,8 +2884,12 @@ final class NotificationCenterViewModel: ObservableObject {
         self.service = service
     }
 
-    func load() async {
-        guard state != .loading else { return }
+    var unreadCount: Int {
+        snapshot?.unreadCount ?? 0
+    }
+
+    func load(force: Bool = false) async {
+        guard force || state != .loading else { return }
         state = .loading
         do {
             snapshot = try await service.fetchNotificationSnapshot()
@@ -2865,11 +2898,44 @@ final class NotificationCenterViewModel: ObservableObject {
             state = .failed(error.localizedDescription)
         }
     }
+
+    func markRead(_ notification: MeecoNotification) async {
+        guard notification.isUnread, let url = notification.url else { return }
+        applyReadState(for: notification.id)
+        do {
+            try await service.markNotificationRead(url: url)
+            await load(force: true)
+        } catch {
+            await load(force: true)
+        }
+    }
+
+    private func applyReadState(for id: String) {
+        guard let currentSnapshot = snapshot else { return }
+        var didUpdateUnread = false
+        let notifications = currentSnapshot.notifications.map { notification in
+            guard notification.id == id, notification.isUnread else { return notification }
+            didUpdateUnread = true
+            return MeecoNotification(
+                id: notification.id,
+                title: notification.title,
+                body: notification.body,
+                date: notification.date,
+                url: notification.url,
+                isUnread: false
+            )
+        }
+        snapshot = MeecoNotificationSnapshot(
+            unreadCount: didUpdateUnread ? max(0, currentSnapshot.unreadCount - 1) : currentSnapshot.unreadCount,
+            notifications: notifications.sortedForDisplay,
+            fetchedAt: Date()
+        )
+    }
 }
 
 struct NotificationCenterView: View {
     @EnvironmentObject private var authSession: MeecoAuthSession
-    @StateObject private var viewModel = NotificationCenterViewModel()
+    @EnvironmentObject private var viewModel: NotificationCenterViewModel
     @State private var webAction: MeecoWebAction?
 
     var body: some View {
@@ -2904,6 +2970,7 @@ struct NotificationCenterView: View {
                         Button {
                             if let url = notification.url {
                                 webAction = MeecoWebAction(title: "알림", url: url)
+                                Task { await viewModel.markRead(notification) }
                             }
                         } label: {
                             NotificationRow(notification: notification)
@@ -2921,7 +2988,7 @@ struct NotificationCenterView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {
-                    Task { await viewModel.load() }
+                    Task { await viewModel.load(force: true) }
                 } label: {
                     Image(systemName: "arrow.clockwise")
                 }
@@ -2940,7 +3007,7 @@ struct NotificationCenterView: View {
         }
         .refreshable {
             if authSession.isLoggedIn {
-                await viewModel.load()
+                await viewModel.load(force: true)
             }
         }
     }
@@ -2993,6 +3060,10 @@ struct NotificationCenterView: View {
 struct NotificationRow: View {
     let notification: MeecoNotification
 
+    private var foregroundStyle: Color {
+        notification.isUnread ? .primary : .secondary
+    }
+
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             Image(systemName: notification.isUnread ? "bell.badge.fill" : "bell")
@@ -3003,7 +3074,7 @@ struct NotificationRow: View {
                 HStack(alignment: .firstTextBaseline) {
                     Text(notification.title)
                         .font(.subheadline.weight(notification.isUnread ? .bold : .semibold))
-                        .foregroundColor(.primary)
+                        .foregroundColor(foregroundStyle)
                         .lineLimit(2)
                     Spacer(minLength: 8)
                     Text(notification.date)
@@ -3021,6 +3092,7 @@ struct NotificationRow: View {
             }
         }
         .padding(.vertical, 4)
+        .opacity(notification.isUnread ? 1 : 0.68)
     }
 }
 
@@ -3459,6 +3531,11 @@ struct MeecoService {
         return parser.notificationSnapshot(from: html, baseURL: Self.notificationURL)
     }
 
+    func markNotificationRead(url: URL) async throws {
+        await syncWebViewCookiesToSharedStorage()
+        _ = try await fetchHTML(from: url, validatesStatus: false)
+    }
+
     func fetchLoginForm() async throws -> MeecoLoginForm {
         let html = try await fetchHTML(from: Self.loginFormURL)
         guard let loginForm = parser.loginForm(from: html, baseURL: Self.loginFormURL) else {
@@ -3740,7 +3817,7 @@ struct MeecoHTMLParser {
     }
 
     func notificationSnapshot(from html: String, baseURL: URL) -> MeecoNotificationSnapshot {
-        let notifications = notificationItems(from: html, baseURL: baseURL)
+        let notifications = notificationItems(from: html, baseURL: baseURL).sortedForDisplay
         let unreadCount = unreadNotificationCount(from: html) ?? notifications.filter(\.isUnread).count
         return MeecoNotificationSnapshot(
             unreadCount: unreadCount,
@@ -5337,6 +5414,17 @@ private extension MeecoPost {
         case "Makgora": return .orange
         case "Balloon": return .purple
         default: return .accentColor
+        }
+    }
+}
+
+private extension Array where Element == MeecoNotification {
+    var sortedForDisplay: [MeecoNotification] {
+        sorted { lhs, rhs in
+            if lhs.isUnread != rhs.isUnread {
+                return lhs.isUnread && !rhs.isUnread
+            }
+            return lhs.date > rhs.date
         }
     }
 }
