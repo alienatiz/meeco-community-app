@@ -144,22 +144,9 @@ struct NotificationToolbarIcon: View {
     let unreadCount: Int
 
     var body: some View {
-        ZStack(alignment: .topTrailing) {
-            Image(systemName: unreadCount > 0 ? "bell.badge" : "bell")
-
-            if unreadCount > 0 {
-                Text(unreadCount > 99 ? "99+" : "\(unreadCount)")
-                    .font(.caption2.weight(.bold))
-                    .foregroundColor(.white)
-                    .monospacedDigit()
-                    .padding(.horizontal, 5)
-                    .frame(minWidth: 18, minHeight: 18)
-                    .background(Color.red)
-                    .clipShape(Capsule())
-                    .offset(x: 9, y: -9)
-                    .accessibilityHidden(true)
-            }
-        }
+        Image(systemName: unreadCount > 0 ? "bell.badge" : "bell")
+            .symbolRenderingMode(unreadCount > 0 ? .palette : .monochrome)
+            .foregroundStyle(unreadCount > 0 ? Color.accentColor : Color.primary, Color.red)
     }
 }
 
@@ -3818,7 +3805,8 @@ struct MeecoHTMLParser {
 
     func notificationSnapshot(from html: String, baseURL: URL) -> MeecoNotificationSnapshot {
         let notifications = notificationItems(from: html, baseURL: baseURL).sortedForDisplay
-        let unreadCount = unreadNotificationCount(from: html) ?? notifications.filter(\.isUnread).count
+        let parsedUnreadCount = unreadNotificationCount(from: html) ?? notifications.filter(\.isUnread).count
+        let unreadCount = notifications.isEmpty ? 0 : min(parsedUnreadCount, notifications.count)
         return MeecoNotificationSnapshot(
             unreadCount: unreadCount,
             notifications: notifications,
@@ -3882,11 +3870,16 @@ struct MeecoHTMLParser {
     private func notificationItem(attributes: String, bodyHTML: String, baseURL: URL) -> MeecoNotification? {
         let plainText = bodyHTML.plainHTMLText
         guard !plainText.isEmpty else { return nil }
-        guard plainText.localizedCaseInsensitiveContains("알림")
+
+        let hasNotificationMarker = attributes.localizedCaseInsensitiveContains("notify")
+            || attributes.localizedCaseInsensitiveContains("ncenter")
+            || attributes.localizedCaseInsensitiveContains("unread")
+            || bodyHTML.localizedCaseInsensitiveContains("procNcenterliteRedirect")
+            || bodyHTML.localizedCaseInsensitiveContains("ncenterlite")
             || bodyHTML.localizedCaseInsensitiveContains("notify")
-            || bodyHTML.localizedCaseInsensitiveContains("ncenter")
-            || bodyHTML.localizedCaseInsensitiveContains("comment")
-            || bodyHTML.localizedCaseInsensitiveContains("reply") else {
+            || bodyHTML.localizedCaseInsensitiveContains("is_read")
+
+        guard hasNotificationMarker else {
             return nil
         }
 
@@ -3915,9 +3908,9 @@ struct MeecoHTMLParser {
             .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let unread = attributes.localizedCaseInsensitiveContains("unread")
-            || attributes.localizedCaseInsensitiveContains("new")
-            || bodyHTML.localizedCaseInsensitiveContains("unread")
-            || bodyHTML.localizedCaseInsensitiveContains("new")
+            || attributes.firstMatch(pattern: #"class\s*=\s*["'][^"']*\bnew\b"#, options: [.caseInsensitive]) != nil
+            || bodyHTML.firstMatch(pattern: #"class\s*=\s*["'][^"']*\bunread\b"#, options: [.caseInsensitive]) != nil
+            || bodyHTML.firstMatch(pattern: #"class\s*=\s*["'][^"']*\bnew\b"#, options: [.caseInsensitive]) != nil
             || bodyHTML.localizedCaseInsensitiveContains("is_read\">N")
 
         return MeecoNotification(

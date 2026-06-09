@@ -909,6 +909,30 @@ final class meecoTests: XCTestCase {
         XCTAssertEqual(snapshot.notifications[2].title, "이미 읽은 알림입니다")
     }
 
+    func testParserIgnoresBoardItemsWhenNotificationListIsEmpty() throws {
+        let html = """
+        <nav>
+            <p>새 알림 3</p>
+            <ul>
+                <li><a href="/mini">미니 게시판</a></li>
+                <li><a href="/free/41490040#comment">댓글 많은 자유 게시글</a></li>
+                <li><a href="/news">IT 소식</a></li>
+            </ul>
+        </nav>
+        <div class="ncenter">
+            <p>받은 알림이 없습니다.</p>
+        </div>
+        """
+
+        let snapshot = MeecoHTMLParser().notificationSnapshot(
+            from: html,
+            baseURL: URL(string: "https://meeco.kr/index.php?act=dispNcenterliteNotifyList")!
+        )
+
+        XCTAssertEqual(snapshot.unreadCount, 0)
+        XCTAssertTrue(snapshot.notifications.isEmpty)
+    }
+
     func testParserLoadsPostDetailContent() throws {
         let post = MeecoPost(
             id: URL(string: "https://meeco.kr/mini/41481365")!,
