@@ -832,6 +832,46 @@ final class meecoTests: XCTestCase {
         XCTAssertEqual(loggedInStatus.displayName, "digi")
     }
 
+    func testParserReadsAttendanceSnapshot() throws {
+        let html = """
+        <section>
+            <p>오늘 출석 완료</p>
+            <p>누적 출석 128일</p>
+            <div>이전 출석일 2026.06.08 2026.06.07</div>
+            <table>
+                <tr><th>순위</th><th>닉네임</th><th>한마디</th><th>시간</th><th>포인트</th></tr>
+                <tr>
+                    <td>1</td>
+                    <td>digi</td>
+                    <td>출석합니다</td>
+                    <td>09:10</td>
+                    <td>+10 포인트</td>
+                </tr>
+                <tr>
+                    <td>2</td>
+                    <td>kty4</td>
+                    <td>좋은 하루</td>
+                    <td>26.06.09</td>
+                    <td>5 pt</td>
+                </tr>
+            </table>
+        </section>
+        """
+
+        let snapshot = MeecoHTMLParser().attendanceSnapshot(from: html)
+
+        XCTAssertTrue(snapshot.isCheckedInToday)
+        XCTAssertEqual(snapshot.statusMessage, "오늘 출석 완료")
+        XCTAssertEqual(snapshot.cumulativeAttendanceDays, 128)
+        XCTAssertEqual(snapshot.attendedDates.prefix(2), ["2026.06.08", "2026.06.07"])
+        XCTAssertEqual(snapshot.records.count, 2)
+        XCTAssertEqual(snapshot.records[0].rank, 1)
+        XCTAssertEqual(snapshot.records[0].nickname, "digi")
+        XCTAssertEqual(snapshot.records[0].message, "출석합니다")
+        XCTAssertEqual(snapshot.records[0].time, "09:10")
+        XCTAssertEqual(snapshot.records[0].points, 10)
+    }
+
     func testParserLoadsPostDetailContent() throws {
         let post = MeecoPost(
             id: URL(string: "https://meeco.kr/mini/41481365")!,

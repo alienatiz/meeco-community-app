@@ -106,6 +106,10 @@ struct BoardDirectoryView: View {
                                     NavigationLink(destination: AccountSettingsView().hideRootTabBar()) {
                                         DirectoryItemRow(item: item)
                                     }
+                                case .attendance:
+                                    NavigationLink(destination: AttendanceView().hideRootTabBar()) {
+                                        DirectoryItemRow(item: item)
+                                    }
                                 }
                             }
                         }
@@ -280,7 +284,7 @@ struct MeecoDirectorySection: Identifiable {
     static let settingsSections: [MeecoDirectorySection] = [
         MeecoDirectorySection(id: "account", title: "계정", items: [
             .account,
-            .web(id: "attendance", title: "출석부", description: "미코 출석 체크", systemImage: "calendar.badge.checkmark", url: URL(string: "https://meeco.kr/attendance")!),
+            .attendance,
             .web(id: "sticker", title: "스티커 상점", description: "스티커 구매 및 관리", systemImage: "face.smiling", url: URL(string: "https://meeco.kr/sticker")!)
         ]),
         MeecoDirectorySection(id: "participation", title: "참여 / 운영", items: [
@@ -296,6 +300,7 @@ struct MeecoDirectoryItem: Identifiable {
         case board(MeecoBoard)
         case web(MeecoWebAction)
         case account
+        case attendance
     }
 
     let id: String
@@ -330,6 +335,14 @@ struct MeecoDirectoryItem: Identifiable {
         description: "미코 계정 로그인",
         systemImage: "person.crop.circle",
         destination: .account
+    )
+
+    static let attendance = MeecoDirectoryItem(
+        id: "attendance",
+        title: "출석부",
+        description: "오늘 출석 상태와 최근 출석 기록",
+        systemImage: "calendar.badge.checkmark",
+        destination: .attendance
     )
 }
 
@@ -770,6 +783,24 @@ struct MeecoComment: Identifiable, Equatable {
     let upvoteCount: Int
     let replyDepth: Int
     let isPostAuthor: Bool
+}
+
+struct MeecoAttendanceSnapshot: Equatable {
+    let statusMessage: String
+    let isCheckedInToday: Bool
+    let cumulativeAttendanceDays: Int?
+    let attendedDates: [String]
+    let records: [MeecoAttendanceRecord]
+    let fetchedAt: Date
+}
+
+struct MeecoAttendanceRecord: Identifiable, Equatable {
+    let id = UUID()
+    let rank: Int?
+    let nickname: String
+    let message: String
+    let time: String
+    let points: Int?
 }
 
 @MainActor
@@ -2753,6 +2784,224 @@ final class AccountSettingsViewModel: ObservableObject {
     }
 }
 
+@MainActor
+final class AttendanceViewModel: ObservableObject {
+    enum LoadingState: Equatable {
+        case idle
+        case loading
+        case loaded
+        case failed(String)
+    }
+
+    @Published private(set) var snapshot: MeecoAttendanceSnapshot?
+    @Published private(set) var state: LoadingState = .idle
+
+    private let service: MeecoService
+
+    init(service: MeecoService = MeecoService()) {
+        self.service = service
+    }
+
+    func load() async {
+        guard state != .loading else { return }
+        state = .loading
+        do {
+            snapshot = try await service.fetchAttendanceSnapshot()
+            state = .loaded
+        } catch {
+            state = .failed(error.localizedDescription)
+        }
+    }
+}
+
+struct AttendanceView: View {
+    @EnvironmentObject private var authSession: MeecoAuthSession
+    @StateObject private var viewModel = AttendanceViewModel()
+    @State private var webAction: MeecoWebAction?
+
+    private let attendanceURL = URL(string: "https://meeco.kr/attendance")!
+
+    var body: some View {
+        List {
+            Section("출석") {
+                switch authSession.status {
+                case .unknown, .checking:
+                    HStack {
+                        ProgressView()
+                        Text("로그인 상태 확인 중")
+                    }
+                case .loggedOut, .failed:
+                    VStack(alignment: .leading, spacing: 10) {
+                        Label("로그인이 필요합니다", systemImage: "person.crop.circle.badge.exclamationmark")
+                            .font(.headline)
+                        Text("출석 상태 확인과 출석 체크는 미코 계정 로그인 후 사용할 수 있습니다.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        NavigationLink(destination: AccountSettingsView().hideRootTabBar()) {
+                            Label("로그인", systemImage: "person.crop.circle.fill")
+                        }
+                    }
+                    .padding(.vertical, 4)
+                case .loggedIn:
+                    attendanceStatusContent
+                }
+            }
+
+            if let snapshot = viewModel.snapshot, !snapshot.records.isEmpty {
+                Section("최근 출석") {
+                    ForEach(snapshot.records.prefix(20)) { record in
+                        AttendanceRecordRow(record: record)
+                    }
+                }
+            }
+        }
+        .navigationTitle("출석부")
+#if os(iOS)
+        .navigationBarTitleDisplayMode(.inline)
+#endif
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    Task { await viewModel.load() }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .disabled(viewModel.state == .loading || !authSession.isLoggedIn)
+                .accessibilityLabel("새로고침")
+            }
+        }
+        .sheet(item: $webAction) { action in
+            WebActionView(action: action)
+        }
+        .task {
+            await authSession.verifySession()
+            if authSession.isLoggedIn {
+                await viewModel.load()
+            }
+        }
+        .refreshable {
+            if authSession.isLoggedIn {
+                await viewModel.load()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var attendanceStatusContent: some View {
+        if viewModel.snapshot == nil && (viewModel.state == .idle || viewModel.state == .loading) {
+            HStack {
+                ProgressView()
+                Text("출석 정보를 불러오는 중")
+            }
+        } else {
+            switch viewModel.state {
+        case .failed(let message):
+            VStack(alignment: .leading, spacing: 10) {
+                Label("출석 정보를 불러오지 못했습니다", systemImage: "exclamationmark.triangle")
+                    .font(.headline)
+                Text(message)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                Button {
+                    Task { await viewModel.load() }
+                } label: {
+                    Label("다시 시도", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.bordered)
+            }
+            .padding(.vertical, 4)
+        default:
+            if let snapshot = viewModel.snapshot {
+                VStack(alignment: .leading, spacing: 12) {
+                    Label(
+                        snapshot.statusMessage,
+                        systemImage: snapshot.isCheckedInToday ? "checkmark.seal.fill" : "calendar.badge.checkmark"
+                    )
+                    .font(.headline)
+                    .foregroundColor(snapshot.isCheckedInToday ? .green : .accentColor)
+
+                    if let cumulativeAttendanceDays = snapshot.cumulativeAttendanceDays {
+                        Label("누적 출석 \(cumulativeAttendanceDays)일", systemImage: "calendar")
+                            .font(.subheadline.weight(.semibold))
+                    }
+
+                    if !snapshot.attendedDates.isEmpty {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("이전 출석일")
+                                .font(.caption.weight(.semibold))
+                                .foregroundColor(.secondary)
+                            Text(snapshot.attendedDates.prefix(12).joined(separator: ", "))
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                                .lineLimit(3)
+                        }
+                    }
+
+                    Text("최근 업데이트 \(snapshot.fetchedAt.formatted(date: .omitted, time: .shortened))")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+
+                    Button {
+                        webAction = MeecoWebAction(title: "출석 체크", url: attendanceURL)
+                    } label: {
+                        Label(snapshot.isCheckedInToday ? "출석부 열기" : "출석 체크", systemImage: "safari")
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+                .padding(.vertical, 4)
+            }
+            }
+        }
+    }
+}
+
+struct AttendanceRecordRow: View {
+    let record: MeecoAttendanceRecord
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            if let rank = record.rank {
+                Text("\(rank)")
+                    .font(.caption.weight(.bold))
+                    .foregroundColor(.white)
+                    .frame(width: 24, height: 24)
+                    .background(Color.accentColor)
+                    .clipShape(Circle())
+            } else {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundColor(.green)
+                    .frame(width: 24, height: 24)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text(record.nickname)
+                        .font(.subheadline.weight(.semibold))
+                    Spacer(minLength: 8)
+                    Text(record.time)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+
+                if !record.message.isEmpty {
+                    Text(record.message)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .lineLimit(2)
+                }
+            }
+
+            if let points = record.points {
+                Text("+\(points)")
+                    .font(.caption.weight(.semibold))
+                    .foregroundColor(.green)
+                    .monospacedDigit()
+            }
+        }
+        .padding(.vertical, 4)
+    }
+}
+
 struct AccountSettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var authSession: MeecoAuthSession
@@ -2955,6 +3204,7 @@ struct MeecoService {
     }
 
     static let loginFormURL = URL(string: "https://meeco.kr/index.php?act=dispMemberLoginForm")!
+    static let attendanceURL = URL(string: "https://meeco.kr/attendance")!
 
     private let parser = MeecoHTMLParser()
     private let boardSnapshotFetcher: BoardSnapshotFetcher?
@@ -2984,6 +3234,12 @@ struct MeecoService {
     func fetchPostDetail(for post: MeecoPost) async throws -> MeecoPostDetail {
         let html = try await fetchHTML(from: post.url)
         return parser.postDetail(from: html, fallbackPost: post)
+    }
+
+    func fetchAttendanceSnapshot() async throws -> MeecoAttendanceSnapshot {
+        await syncWebViewCookiesToSharedStorage()
+        let html = try await fetchHTML(from: cacheBypassedURL(from: Self.attendanceURL), validatesStatus: false)
+        return parser.attendanceSnapshot(from: html)
     }
 
     func fetchLoginForm() async throws -> MeecoLoginForm {
@@ -3092,6 +3348,7 @@ struct MeecoService {
         var request = URLRequest(url: url)
         request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
         request.timeoutInterval = 20
+        request.httpShouldHandleCookies = true
         request.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15", forHTTPHeaderField: "User-Agent")
         request.setValue("no-cache, no-store, max-age=0", forHTTPHeaderField: "Cache-Control")
         request.setValue("no-cache", forHTTPHeaderField: "Pragma")
@@ -3106,6 +3363,20 @@ struct MeecoService {
         }
 
         return html
+    }
+
+    private func syncWebViewCookiesToSharedStorage() async {
+        let cookies = await withCheckedContinuation { continuation in
+            DispatchQueue.main.async {
+                WKWebsiteDataStore.default().httpCookieStore.getAllCookies { cookies in
+                    continuation.resume(returning: cookies)
+                }
+            }
+        }
+
+        cookies
+            .filter { $0.domain.contains("meeco.kr") }
+            .forEach { HTTPCookieStorage.shared.setCookie($0) }
     }
 
     private func validateHTTPResponse(_ response: URLResponse) throws {
@@ -3237,6 +3508,20 @@ struct MeecoHTMLParser {
         )
     }
 
+    func attendanceSnapshot(from html: String) -> MeecoAttendanceSnapshot {
+        let plainText = html.plainHTMLText
+        let isCheckedInToday = attendanceCheckedIn(from: plainText)
+        let records = attendanceRecords(from: html)
+        return MeecoAttendanceSnapshot(
+            statusMessage: attendanceStatusMessage(from: plainText, isCheckedInToday: isCheckedInToday),
+            isCheckedInToday: isCheckedInToday,
+            cumulativeAttendanceDays: cumulativeAttendanceDays(from: plainText),
+            attendedDates: attendedDates(from: plainText),
+            records: records,
+            fetchedAt: Date()
+        )
+    }
+
     private func priceDealInfo(from html: String, bodyHTML: String, baseURL: URL, fallbackTitle: String) -> MeecoDealInfo? {
         let rows = priceExtraRows(from: html)
         let explicitStatus = rows
@@ -3248,6 +3533,131 @@ struct MeecoHTMLParser {
 
         guard inferredStatus != nil || !links.isEmpty else { return nil }
         return MeecoDealInfo(status: inferredStatus, links: links)
+    }
+
+    private func attendanceCheckedIn(from text: String) -> Bool {
+        let lowered = text.lowercased()
+        return text.contains("출석완료")
+            || text.contains("출석 완료")
+            || text.contains("이미 출석")
+            || text.contains("오늘 출석")
+            || lowered.contains("checked")
+            || lowered.contains("already")
+    }
+
+    private func attendanceStatusMessage(from text: String, isCheckedInToday: Bool) -> String {
+        if isCheckedInToday {
+            return "오늘 출석 완료"
+        }
+
+        if text.contains("로그인") && !text.contains("로그아웃") {
+            return "로그인 후 출석할 수 있습니다"
+        }
+
+        return "오늘 출석 전"
+    }
+
+    private func cumulativeAttendanceDays(from text: String) -> Int? {
+        let patterns = [
+            #"누적\s*출석(?:일|일수)?\s*[:：]?\s*(\d+)\s*일"#,
+            #"총\s*출석(?:일|일수)?\s*[:：]?\s*(\d+)\s*일"#,
+            #"출석(?:일|일수)\s*[:：]?\s*(\d+)\s*일"#,
+            #"(\d+)\s*일\s*(?:연속|누적)?\s*출석"#
+        ]
+
+        return patterns
+            .lazy
+            .compactMap { text.firstMatch(pattern: $0).flatMap(Int.init) }
+            .first
+    }
+
+    private func attendedDates(from text: String) -> [String] {
+        var seen = Set<String>()
+        return text.matches(pattern: #"(20\d{2}[./-]\d{1,2}[./-]\d{1,2}|\d{2}[./-]\d{1,2}[./-]\d{1,2})"#)
+            .compactMap { match in
+                match.indices.contains(1) ? match[1] : nil
+            }
+            .filter { date in
+                seen.insert(date).inserted
+            }
+    }
+
+    private func attendanceRecords(from html: String) -> [MeecoAttendanceRecord] {
+        let tableRows = html.matches(
+            pattern: #"<tr\b[^>]*>(.*?)</tr>"#,
+            options: [.caseInsensitive, .dotMatchesLineSeparators]
+        )
+        .compactMap { match -> MeecoAttendanceRecord? in
+            guard match.count > 1 else { return nil }
+            let cells = match[1].matches(
+                pattern: #"<t[dh]\b[^>]*>(.*?)</t[dh]>"#,
+                options: [.caseInsensitive, .dotMatchesLineSeparators]
+            )
+            .compactMap { $0.count > 1 ? $0[1].plainHTMLText.nonEmpty : nil }
+            return attendanceRecord(from: cells)
+        }
+
+        if !tableRows.isEmpty {
+            return tableRows
+        }
+
+        return html.matches(
+            pattern: #"<li\b[^>]*>(.*?)</li>"#,
+            options: [.caseInsensitive, .dotMatchesLineSeparators]
+        )
+        .compactMap { match -> MeecoAttendanceRecord? in
+            guard match.count > 1 else { return nil }
+            let fields = match[1].matches(
+                pattern: #"<(?:span|div|time|strong|em)\b[^>]*>(.*?)</(?:span|div|time|strong|em)>"#,
+                options: [.caseInsensitive, .dotMatchesLineSeparators]
+            )
+            .compactMap { $0.count > 1 ? $0[1].plainHTMLText.nonEmpty : nil }
+            return attendanceRecord(from: fields.isEmpty ? [match[1].plainHTMLText] : fields)
+        }
+    }
+
+    private func attendanceRecord(from fields: [String]) -> MeecoAttendanceRecord? {
+        let cleanedFields = fields
+            .map { $0.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        guard cleanedFields.count >= 2 else { return nil }
+        guard cleanedFields.contains(where: { $0.isPostDate || $0.firstMatch(pattern: #"\d{1,2}:\d{2}"#) != nil }) else {
+            return nil
+        }
+
+        let rank = cleanedFields.first.flatMap { Int($0) }
+        let time = cleanedFields.first(where: { $0.isPostDate || $0.firstMatch(pattern: #"\d{1,2}:\d{2}"#) != nil }) ?? ""
+        let points = cleanedFields
+            .compactMap { field -> Int? in
+                if let point = field.firstMatch(pattern: #"([+-]?\d+)\s*(?:포인트|point|pt|p)"#, options: [.caseInsensitive]) {
+                    return Int(point.replacingOccurrences(of: "+", with: ""))
+                }
+                return nil
+            }
+            .first
+        let nickname = cleanedFields.first { field in
+            field != time
+                && Int(field) == nil
+                && field.firstMatch(pattern: #"([+-]?\d+\s*(?:포인트|point|pt|p))"#, options: [.caseInsensitive]) == nil
+                && !field.localizedCaseInsensitiveContains("출석")
+        } ?? ""
+        let message = cleanedFields
+            .filter { field in
+                field != nickname
+                    && field != time
+                    && Int(field) == nil
+                    && field.firstMatch(pattern: #"([+-]?\d+\s*(?:포인트|point|pt|p))"#, options: [.caseInsensitive]) == nil
+            }
+            .max { $0.count < $1.count } ?? ""
+
+        guard !nickname.isEmpty else { return nil }
+        return MeecoAttendanceRecord(
+            rank: rank,
+            nickname: nickname,
+            message: message,
+            time: time,
+            points: points
+        )
     }
 
     private func priceExtraRows(from html: String) -> [(label: String, value: String, valueHTML: String)] {
