@@ -731,6 +731,30 @@ final class meecoTests: XCTestCase {
         XCTAssertEqual(form.validatorID, "modules/member/m.skin/default/login_form/1")
         XCTAssertEqual(form.signUpURL?.absoluteString, "https://meeco.kr/index.php?mid=mini&act=dispMemberSignUpForm")
         XCTAssertEqual(form.findAccountURL?.absoluteString, "https://meeco.kr/index.php?mid=mini&act=dispMemberFindAccount")
+        XCTAssertEqual(form.hiddenFields["act"], "procMemberLogin")
+        XCTAssertEqual(form.hiddenFields["module"], "member")
+    }
+
+    func testParserReadsAuthStatusFromLoginAndLogoutMarkup() throws {
+        let parser = MeecoHTMLParser()
+        let loggedOutHTML = """
+        <form action="/" method="POST">
+            <input type="hidden" name="act" value="procMemberLogin" />
+            <input type="text" name="user_id" />
+            <input type="password" name="password" />
+        </form>
+        """
+        let loggedInHTML = """
+        <nav>
+            <a href="/index.php?act=dispMemberInfo">digi</a>
+            <a href="/index.php?act=procMemberLogout">로그아웃</a>
+        </nav>
+        """
+
+        XCTAssertFalse(parser.authStatus(from: loggedOutHTML).isLoggedIn)
+        let loggedInStatus = parser.authStatus(from: loggedInHTML)
+        XCTAssertTrue(loggedInStatus.isLoggedIn)
+        XCTAssertEqual(loggedInStatus.displayName, "digi")
     }
 
     func testParserLoadsPostDetailContent() throws {

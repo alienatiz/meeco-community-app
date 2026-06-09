@@ -12,6 +12,7 @@ import ImageIO
 struct ContentView: View {
     @State private var selectedTab: MeecoAppTab = .main
     @State private var webAction: MeecoWebAction?
+    @StateObject private var authSession = MeecoAuthSession()
     @AppStorage("favoriteBoardIDs") private var favoriteBoardIDsStorage = ""
 
     var body: some View {
@@ -23,8 +24,12 @@ struct ContentView: View {
                 onSearch: openRootSearch
             )
         }
+        .environmentObject(authSession)
         .sheet(item: $webAction) { action in
             WebActionView(action: action)
+        }
+        .task {
+            await authSession.verifySession()
         }
     }
 
@@ -655,6 +660,18 @@ struct MeecoLoginForm: Equatable {
     let validatorID: String?
     let signUpURL: URL?
     let findAccountURL: URL?
+    var hiddenFields: [String: String] = [:]
+}
+
+struct MeecoAuthStatus: Equatable {
+    var isLoggedIn: Bool
+    var displayName: String?
+}
+
+struct MeecoLoginCredentials {
+    let userID: String
+    let password: String
+    let keepSigned: Bool
 }
 
 struct MeecoBoardSnapshot {
@@ -1005,9 +1022,11 @@ struct BoardView: View {
     let board: MeecoBoard
 
     @Environment(\.scenePhase) private var scenePhase
+    @EnvironmentObject private var authSession: MeecoAuthSession
     @StateObject private var viewModel: BoardViewModel
     @State private var webAction: MeecoWebAction?
     @State private var searchText = ""
+    @State private var isLoginRequired = false
     @AppStorage("favoriteBoardIDs") private var favoriteBoardIDsStorage = ""
     private let refreshTimer = Timer.publish(every: 120, on: .main, in: .common).autoconnect()
 
@@ -1115,7 +1134,7 @@ struct BoardView: View {
             ToolbarItem(placement: .primaryAction) {
                 Menu {
                     Button {
-                        webAction = MeecoWebAction(title: "글쓰기", url: board.writeURL(category: viewModel.selectedCategory))
+                        openAuthenticatedWebAction(title: "글쓰기", url: board.writeURL(category: viewModel.selectedCategory))
                     } label: {
                         Label("글쓰기", systemImage: "square.and.pencil")
                     }
@@ -1143,12 +1162,15 @@ struct BoardView: View {
                 searchText: $searchText,
                 onSearch: submitSearch,
                 onCompose: {
-                    webAction = MeecoWebAction(title: "글쓰기", url: board.writeURL(category: viewModel.selectedCategory))
+                    openAuthenticatedWebAction(title: "글쓰기", url: board.writeURL(category: viewModel.selectedCategory))
                 }
             )
         }
         .sheet(item: $webAction) { action in
             WebActionView(action: action)
+        }
+        .sheet(isPresented: $isLoginRequired) {
+            AccountSettingsView()
         }
         .task {
             await viewModel.load()
@@ -1180,6 +1202,14 @@ struct BoardView: View {
             title: "검색",
             url: board.searchURL(query: searchText, category: viewModel.selectedCategory)
         )
+    }
+
+    private func openAuthenticatedWebAction(title: String, url: URL) {
+        if authSession.isLoggedIn {
+            webAction = MeecoWebAction(title: title, url: url)
+        } else {
+            isLoginRequired = true
+        }
     }
 
     private var isFavoriteBoard: Bool {
@@ -2018,10 +2048,12 @@ final class PostDetailViewModel: ObservableObject {
 struct PostDetailView: View {
     let post: MeecoPost
 
+    @EnvironmentObject private var authSession: MeecoAuthSession
     @StateObject private var viewModel: PostDetailViewModel
     @State private var webAction: MeecoWebAction?
     @State private var selectedComment: MeecoComment?
     @State private var selectedImage: MeecoMedia?
+    @State private var isLoginRequired = false
 
     init(post: MeecoPost) {
         self.post = post
@@ -2047,11 +2079,14 @@ struct PostDetailView: View {
         .navigationTitle("")
         .safeAreaInset(edge: .bottom) {
             PostCommentActionBar {
-                webAction = MeecoWebAction(title: "댓글 쓰기", url: post.commentURL)
+                openAuthenticatedWebAction(title: "댓글 쓰기", url: post.commentURL)
             }
         }
         .sheet(item: $webAction) { action in
             WebActionView(action: action)
+        }
+        .sheet(isPresented: $isLoginRequired) {
+            AccountSettingsView()
         }
         .fullScreenCover(item: $selectedImage) { media in
             OriginalImageViewer(media: media) {
@@ -2071,13 +2106,13 @@ struct PostDetailView: View {
             presenting: selectedComment
         ) { comment in
             Button {
-                webAction = MeecoWebAction(title: "댓글 추천", url: post.commentURL)
+                openAuthenticatedWebAction(title: "댓글 추천", url: post.commentURL)
             } label: {
                 Label("추천하기", systemImage: "heart")
             }
 
             Button {
-                webAction = MeecoWebAction(title: "답글 쓰기", url: post.commentURL)
+                openAuthenticatedWebAction(title: "답글 쓰기", url: post.commentURL)
             } label: {
                 Label("답글 쓰기", systemImage: "arrowshape.turn.up.left")
             }
@@ -2091,6 +2126,14 @@ struct PostDetailView: View {
             await viewModel.load()
         }
         .hideTabBarWhileReading()
+    }
+
+    private func openAuthenticatedWebAction(title: String, url: URL) {
+        if authSession.isLoggedIn {
+            webAction = MeecoWebAction(title: title, url: url)
+        } else {
+            isLoginRequired = true
+        }
     }
 
     private func fallbackWebContent(message: String) -> some View {
@@ -2488,6 +2531,123 @@ struct ReplyConnector: View {
 }
 
 @MainActor
+final class MeecoAuthSession: ObservableObject {
+    enum Status: Equatable {
+        case unknown
+        case checking
+        case loggedOut
+        case loggedIn(String?)
+        case failed(String)
+    }
+
+    @Published private(set) var status: Status = .unknown
+    @Published private(set) var loginForm: MeecoLoginForm?
+    @Published var userID = ""
+    @Published var password = ""
+    @Published var keepSigned = true
+
+    private let service: MeecoService
+
+    init(service: MeecoService = MeecoService()) {
+        self.service = service
+    }
+
+    var isLoggedIn: Bool {
+        if case .loggedIn = status { return true }
+        return false
+    }
+
+    var statusText: String {
+        switch status {
+        case .unknown, .checking:
+            return "로그인 상태 확인 중"
+        case .loggedOut:
+            return "로그인이 필요합니다"
+        case .loggedIn(let displayName):
+            return [displayName, "로그인됨"].compactMap { $0?.nonEmpty }.joined(separator: " ")
+        case .failed(let message):
+            return message
+        }
+    }
+
+    func verifySession() async {
+        status = .checking
+        do {
+            let verifiedStatus = try await service.fetchAuthStatus()
+            await apply(status: verifiedStatus)
+        } catch {
+            status = .failed(error.localizedDescription)
+        }
+    }
+
+    func prepareLoginForm() async {
+        guard loginForm == nil else { return }
+        do {
+            loginForm = try await service.fetchLoginForm()
+            if case .checking = status {
+                status = .loggedOut
+            } else if case .unknown = status {
+                status = .loggedOut
+            }
+        } catch {
+            if isLoggedIn {
+                return
+            }
+            status = .failed(error.localizedDescription)
+        }
+    }
+
+    func login() async {
+        let trimmedUserID = userID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedUserID.isEmpty, !password.isEmpty else {
+            status = .failed("아이디와 비밀번호를 입력해 주세요.")
+            return
+        }
+
+        status = .checking
+        do {
+            let form: MeecoLoginForm
+            if let currentLoginForm = loginForm {
+                form = currentLoginForm
+            } else {
+                form = try await service.fetchLoginForm()
+            }
+            loginForm = form
+            let verifiedStatus = try await service.login(
+                credentials: MeecoLoginCredentials(
+                    userID: trimmedUserID,
+                    password: password,
+                    keepSigned: keepSigned
+                ),
+                form: form
+            )
+            password = ""
+            await apply(status: verifiedStatus)
+        } catch {
+            status = .failed(error.localizedDescription)
+        }
+    }
+
+    func logout() async {
+        await service.clearSessionCookies()
+        userID = ""
+        password = ""
+        status = .loggedOut
+        loginForm = nil
+    }
+
+    private func apply(status authStatus: MeecoAuthStatus) async {
+        if authStatus.isLoggedIn {
+            status = .loggedIn(authStatus.displayName)
+            loginForm = nil
+        } else {
+            status = .loggedOut
+            await prepareLoginForm()
+        }
+    }
+}
+
+@MainActor
 final class AccountSettingsViewModel: ObservableObject {
     enum LoadingState: Equatable {
         case idle
@@ -2519,41 +2679,61 @@ final class AccountSettingsViewModel: ObservableObject {
 
 struct AccountSettingsView: View {
     @Environment(\.dismiss) private var dismiss
-    @StateObject private var viewModel = AccountSettingsViewModel()
+    @EnvironmentObject private var authSession: MeecoAuthSession
     @State private var webAction: MeecoWebAction?
 
     var body: some View {
         NavigationView {
             List {
                 Section("계정") {
-                    switch viewModel.state {
-                    case .idle, .loading:
+                    switch authSession.status {
+                    case .unknown, .checking:
                         HStack {
                             ProgressView()
-                            Text("로그인 정보를 확인하는 중")
+                            Text(authSession.statusText)
                         }
                     case .failed(let message):
                         VStack(alignment: .leading, spacing: 8) {
-                            Text("로그인 영역을 읽지 못했습니다")
+                            Text("로그인 상태를 확인하지 못했습니다")
                                 .font(.headline)
                             Text(message)
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                             Button("다시 시도") {
-                                Task { await viewModel.load() }
+                                Task { await authSession.verifySession() }
                             }
                         }
                         .padding(.vertical, 4)
-                    case .loaded:
-                        if let loginForm = viewModel.loginForm {
-                            LoginFormSummaryView(loginForm: loginForm)
+                    case .loggedIn:
+                        Label(authSession.statusText, systemImage: "checkmark.circle.fill")
+                            .foregroundColor(.green)
+                        Button(role: .destructive) {
+                            Task { await authSession.logout() }
+                        } label: {
+                            Label("로그아웃", systemImage: "rectangle.portrait.and.arrow.right")
                         }
+                    case .loggedOut:
+                        LoginCredentialFormView()
                     }
+                }
 
-                    Button {
-                        webAction = MeecoWebAction(title: "로그인", url: MeecoService.loginFormURL)
-                    } label: {
-                        Label("미코 로그인 열기", systemImage: "person.crop.circle")
+                if let loginForm = authSession.loginForm {
+                    Section("계정 도움말") {
+                        if let signUpURL = loginForm.signUpURL {
+                            Button {
+                                webAction = MeecoWebAction(title: "회원가입", url: signUpURL)
+                            } label: {
+                                Label("회원가입", systemImage: "person.badge.plus")
+                            }
+                        }
+
+                        if let findAccountURL = loginForm.findAccountURL {
+                            Button {
+                                webAction = MeecoWebAction(title: "ID/PW 찾기", url: findAccountURL)
+                            } label: {
+                                Label("ID/PW 찾기", systemImage: "questionmark.circle")
+                            }
+                        }
                     }
                 }
             }
@@ -2573,26 +2753,33 @@ struct AccountSettingsView: View {
             WebActionView(action: action)
         }
         .task {
-            await viewModel.load()
+            await authSession.verifySession()
+            await authSession.prepareLoginForm()
         }
     }
 }
 
-struct LoginFormSummaryView: View {
-    let loginForm: MeecoLoginForm
+struct LoginCredentialFormView: View {
+    @EnvironmentObject private var authSession: MeecoAuthSession
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label("로그인 양식 확인됨", systemImage: "checkmark.circle")
-                .font(.headline)
-            Text("아이디: \(loginForm.userIDField)")
-            Text("비밀번호: \(loginForm.passwordField)")
-            if let keepSignedField = loginForm.keepSignedField {
-                Text("로그인 유지: \(keepSignedField)")
+        VStack(alignment: .leading, spacing: 12) {
+            TextField("아이디", text: $authSession.userID)
+                .textInputAutocapitalization(.never)
+                .disableAutocorrection(true)
+
+            SecureField("비밀번호", text: $authSession.password)
+
+            Toggle("로그인 유지", isOn: $authSession.keepSigned)
+
+            Button {
+                Task { await authSession.login() }
+            } label: {
+                Label("로그인", systemImage: "person.crop.circle.fill")
             }
+            .buttonStyle(.borderedProminent)
+            .disabled(authSession.userID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || authSession.password.isEmpty)
         }
-        .font(.caption)
-        .foregroundColor(.secondary)
         .padding(.vertical, 4)
     }
 }
@@ -2677,6 +2864,7 @@ struct MeecoService {
     enum ServiceError: LocalizedError {
         case invalidResponse
         case emptyResult
+        case loginFailed
 
         var errorDescription: String? {
             switch self {
@@ -2684,6 +2872,8 @@ struct MeecoService {
                 return "서버 응답을 읽을 수 없습니다."
             case .emptyResult:
                 return "파싱된 내용이 없습니다."
+            case .loginFailed:
+                return "로그인에 실패했습니다. 아이디와 비밀번호를 확인해 주세요."
             }
         }
     }
@@ -2729,6 +2919,79 @@ struct MeecoService {
         return loginForm
     }
 
+    func fetchAuthStatus() async throws -> MeecoAuthStatus {
+        let html = try await fetchHTML(from: Self.loginFormURL)
+        return parser.authStatus(from: html)
+    }
+
+    func login(credentials: MeecoLoginCredentials, form: MeecoLoginForm) async throws -> MeecoAuthStatus {
+        var fields = form.hiddenFields
+        fields[form.userIDField] = credentials.userID
+        fields[form.passwordField] = credentials.password
+        if let keepSignedField = form.keepSignedField {
+            if credentials.keepSigned {
+                fields[keepSignedField] = form.keepSignedDefaultValue ?? "Y"
+            } else {
+                fields.removeValue(forKey: keepSignedField)
+            }
+        }
+
+        var requestURL = form.actionURL
+        var request = URLRequest(url: requestURL)
+        request.httpMethod = form.method == "GET" ? "GET" : "POST"
+        request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+        request.timeoutInterval = 20
+        request.httpShouldHandleCookies = true
+        request.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15", forHTTPHeaderField: "User-Agent")
+
+        let encodedFields = formURLEncoded(fields)
+        if request.httpMethod == "GET" {
+            var components = URLComponents(url: requestURL, resolvingAgainstBaseURL: false)
+            let existingQuery = components?.percentEncodedQuery
+            components?.percentEncodedQuery = [existingQuery, encodedFields].compactMap { $0?.nonEmpty }.joined(separator: "&")
+            requestURL = components?.url ?? requestURL
+            request.url = requestURL
+        } else {
+            request.setValue("application/x-www-form-urlencoded; charset=utf-8", forHTTPHeaderField: "Content-Type")
+            request.httpBody = encodedFields.data(using: .utf8)
+        }
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validateHTTPResponse(response)
+        await syncCookiesToWebViewStore(from: response, for: requestURL)
+
+        guard let html = decodeHTML(data) else {
+            throw ServiceError.invalidResponse
+        }
+
+        let status = parser.authStatus(from: html)
+        if status.isLoggedIn {
+            return status
+        }
+
+        let verifiedStatus = try await fetchAuthStatus()
+        guard verifiedStatus.isLoggedIn else {
+            throw ServiceError.loginFailed
+        }
+        return verifiedStatus
+    }
+
+    func clearSessionCookies() async {
+        let storage = HTTPCookieStorage.shared
+        storage.cookies?
+            .filter { $0.domain.contains("meeco.kr") }
+            .forEach(storage.deleteCookie)
+
+        await MainActor.run {
+            WKWebsiteDataStore.default().httpCookieStore.getAllCookies { cookies in
+                let meecoCookies = cookies.filter { $0.domain.contains("meeco.kr") }
+                for cookie in meecoCookies {
+                    WKWebsiteDataStore.default().httpCookieStore.delete(cookie)
+                }
+            }
+        }
+    }
+
     private func cacheBypassedURL(from url: URL) -> URL {
         guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
             return url
@@ -2751,13 +3014,53 @@ struct MeecoService {
         request.setValue("0", forHTTPHeaderField: "Expires")
 
         let (data, response) = try await URLSession.shared.data(for: request)
-        guard let httpResponse = response as? HTTPURLResponse,
-              (200..<400).contains(httpResponse.statusCode),
-              let html = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .init(rawValue: CFStringConvertEncodingToNSStringEncoding(CFStringEncoding(CFStringEncodings.EUC_KR.rawValue)))) else {
+        try validateHTTPResponse(response)
+        guard let html = decodeHTML(data) else {
             throw ServiceError.invalidResponse
         }
 
         return html
+    }
+
+    private func validateHTTPResponse(_ response: URLResponse) throws {
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200..<400).contains(httpResponse.statusCode) else {
+            throw ServiceError.invalidResponse
+        }
+    }
+
+    private func decodeHTML(_ data: Data) -> String? {
+        String(data: data, encoding: .utf8)
+            ?? String(data: data, encoding: .init(rawValue: CFStringConvertEncodingToNSStringEncoding(CFStringEncoding(CFStringEncodings.EUC_KR.rawValue))))
+    }
+
+    private func formURLEncoded(_ fields: [String: String]) -> String {
+        fields
+            .sorted { $0.key < $1.key }
+            .map { key, value in
+                "\(urlEncodedFormComponent(key))=\(urlEncodedFormComponent(value))"
+            }
+            .joined(separator: "&")
+    }
+
+    private func urlEncodedFormComponent(_ value: String) -> String {
+        var allowed = CharacterSet.urlQueryAllowed
+        allowed.remove(charactersIn: "&+=?")
+        return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
+    }
+
+    private func syncCookiesToWebViewStore(from response: URLResponse, for url: URL) async {
+        guard let httpResponse = response as? HTTPURLResponse else { return }
+        let responseCookies = HTTPCookie.cookies(withResponseHeaderFields: httpResponse.allHeaderFields as? [String: String] ?? [:], for: url)
+        let storedCookies = HTTPCookieStorage.shared.cookies(for: url) ?? []
+        let cookies = responseCookies + storedCookies
+        guard !cookies.isEmpty else { return }
+
+        await MainActor.run {
+            for cookie in cookies {
+                WKWebsiteDataStore.default().httpCookieStore.setCookie(cookie)
+            }
+        }
     }
 }
 
@@ -2965,8 +3268,34 @@ struct MeecoHTMLParser {
             keepSignedDefaultValue: inputValue(in: formHTML, named: keepSignedField),
             validatorID: inputValue(in: formHTML, named: "xe_validator_id"),
             signUpURL: firstLinkURL(in: html, containing: "dispMemberSignUpForm", baseURL: baseURL),
-            findAccountURL: firstLinkURL(in: html, containing: "dispMemberFindAccount", baseURL: baseURL)
+            findAccountURL: firstLinkURL(in: html, containing: "dispMemberFindAccount", baseURL: baseURL),
+            hiddenFields: inputValues(in: formHTML, type: "hidden")
         )
+    }
+
+    func authStatus(from html: String) -> MeecoAuthStatus {
+        if html.localizedCaseInsensitiveContains("procMemberLogout")
+            || html.localizedCaseInsensitiveContains("dispMemberLogout")
+            || html.localizedCaseInsensitiveContains("로그아웃") {
+            return MeecoAuthStatus(isLoggedIn: true, displayName: loggedInDisplayName(from: html))
+        }
+
+        if loginForm(from: html, baseURL: MeecoService.loginFormURL) != nil {
+            return MeecoAuthStatus(isLoggedIn: false, displayName: nil)
+        }
+
+        return MeecoAuthStatus(isLoggedIn: false, displayName: nil)
+    }
+
+    private func loggedInDisplayName(from html: String) -> String? {
+        let candidates = [
+            html.firstMatch(pattern: #"<a\b[^>]*href=["'][^"']*dispMemberInfo[^"']*["'][^>]*>(.*?)</a>"#, group: 1, options: [.caseInsensitive, .dotMatchesLineSeparators]),
+            html.firstMatch(pattern: #"<span\b[^>]*class=["'][^"']*(?:nickname|member)[^"']*["'][^>]*>(.*?)</span>"#, group: 1, options: [.caseInsensitive, .dotMatchesLineSeparators])
+        ]
+
+        return candidates
+            .compactMap { $0?.plainHTMLText.nonEmpty }
+            .first
     }
 
     private func post(fromRowHTML rowHTML: String, baseURL: URL, allowedBoardPaths: Set<String>?, requiredCategory: MeecoBoardCategory?) -> MeecoPost? {
@@ -3175,6 +3504,19 @@ struct MeecoHTMLParser {
                 return attributeValue(named: "value", in: match[1])
             }
             .first
+    }
+
+    private func inputValues(in html: String, type expectedType: String) -> [String: String] {
+        html.matches(pattern: #"<input\b([^>]*)>"#, options: [.caseInsensitive])
+            .reduce(into: [String: String]()) { values, match in
+                guard match.count > 1 else { return }
+                let attributes = match[1]
+                guard attributeValue(named: "type", in: attributes)?.caseInsensitiveCompare(expectedType) == .orderedSame,
+                      let name = attributeValue(named: "name", in: attributes)?.nonEmpty else {
+                    return
+                }
+                values[name] = attributeValue(named: "value", in: attributes) ?? ""
+            }
     }
 
     private func firstLinkURL(in html: String, containing marker: String, baseURL: URL) -> URL? {
