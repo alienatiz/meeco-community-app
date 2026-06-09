@@ -36,6 +36,7 @@ struct ContentView: View {
 enum MeecoAppTab: String, CaseIterable, Identifiable {
     case main
     case board
+    case favorite
     case settings
 
     var id: String { rawValue }
@@ -44,6 +45,7 @@ enum MeecoAppTab: String, CaseIterable, Identifiable {
         switch self {
         case .main: return "Main"
         case .board: return "Board"
+        case .favorite: return "Favorite"
         case .settings: return "Settings"
         }
     }
@@ -52,6 +54,7 @@ enum MeecoAppTab: String, CaseIterable, Identifiable {
         switch self {
         case .main: return "house"
         case .board: return "list.bullet.rectangle"
+        case .favorite: return "star"
         case .settings: return "gearshape"
         }
     }
@@ -62,6 +65,8 @@ enum MeecoAppTab: String, CaseIterable, Identifiable {
             return MeecoDirectorySection.mainSections(favoriteBoardIDs: favoriteBoardIDs)
         case .board:
             return MeecoDirectorySection.boardSections
+        case .favorite:
+            return MeecoDirectorySection.favoriteSections(favoriteBoardIDs: favoriteBoardIDs)
         case .settings:
             return MeecoDirectorySection.settingsSections
         }
@@ -75,29 +80,35 @@ struct BoardDirectoryView: View {
     let onSearch: () -> Void
 
     var body: some View {
-        List {
-            ForEach(sections) { section in
-                Section(section.title) {
-                    ForEach(section.items) { item in
-                        switch item.destination {
-                        case .board(let board):
-                            NavigationLink(destination: BoardView(board: board).hideRootTabBar()) {
-                                DirectoryItemRow(item: item)
-                            }
-                        case .web(let action):
-                            NavigationLink(destination: WebActionView(action: action).hideRootTabBar()) {
-                                DirectoryItemRow(item: item)
-                            }
-                        case .account:
-                            NavigationLink(destination: AccountSettingsView().hideRootTabBar()) {
-                                DirectoryItemRow(item: item)
+        Group {
+            if sections.isEmpty {
+                FavoriteEmptyState()
+            } else {
+                List {
+                    ForEach(sections) { section in
+                        Section(section.title) {
+                            ForEach(section.items) { item in
+                                switch item.destination {
+                                case .board(let board):
+                                    NavigationLink(destination: BoardView(board: board).hideRootTabBar()) {
+                                        DirectoryItemRow(item: item)
+                                    }
+                                case .web(let action):
+                                    NavigationLink(destination: WebActionView(action: action).hideRootTabBar()) {
+                                        DirectoryItemRow(item: item)
+                                    }
+                                case .account:
+                                    NavigationLink(destination: AccountSettingsView().hideRootTabBar()) {
+                                        DirectoryItemRow(item: item)
+                                    }
+                                }
                             }
                         }
                     }
                 }
+                .listStyle(.sidebar)
             }
         }
-        .listStyle(.sidebar)
         .navigationTitle(title)
         .showRootTabBar()
         .safeAreaInset(edge: .bottom) {
@@ -124,13 +135,16 @@ struct RootNavigationBar: View {
                                 .font(.caption.weight(selectedTab == tab ? .bold : .semibold))
                         }
                         .foregroundColor(selectedTab == tab ? .accentColor : .secondary)
-                        .frame(width: 72, height: 58)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 58)
                     }
                     .buttonStyle(.plain)
+                    .frame(maxWidth: .infinity)
                     .accessibilityLabel(tab.title)
                 }
             }
             .padding(.horizontal, 8)
+            .frame(maxWidth: .infinity)
             .frame(height: 64)
             .boardLiquidGlass(cornerRadius: 32)
 
@@ -148,6 +162,25 @@ struct RootNavigationBar: View {
         .padding(.horizontal, 16)
         .padding(.top, 8)
         .padding(.bottom, 10)
+    }
+}
+
+struct FavoriteEmptyState: View {
+    var body: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "star")
+                .font(.largeTitle.weight(.semibold))
+                .foregroundColor(.secondary)
+            Text("즐겨찾기 없음")
+                .font(.headline)
+            Text("게시판 화면의 별 버튼으로 자주 보는 게시판을 추가할 수 있습니다.")
+                .font(.footnote)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 32)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.bottom, 88)
     }
 }
 
@@ -192,6 +225,14 @@ struct MeecoDirectorySection: Identifiable {
             .web(id: "sendDonation", title: "도네 쏘기", description: "미코 후원 보내기", systemImage: "paperplane.fill", url: URL(string: "https://meeco.kr/Support/39348818")!),
             .board(.balloon)
             ])
+        ]
+    }
+
+    static func favoriteSections(favoriteBoardIDs: Set<String>) -> [MeecoDirectorySection] {
+        let favoriteItems = MeecoBoard.boards(matching: favoriteBoardIDs).map(MeecoDirectoryItem.board)
+        guard !favoriteItems.isEmpty else { return [] }
+        return [
+            MeecoDirectorySection(id: "favorites", title: "즐겨찾기", items: favoriteItems)
         ]
     }
 
