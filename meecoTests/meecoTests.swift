@@ -742,6 +742,7 @@ final class meecoTests: XCTestCase {
             <input type="hidden" name="act" value="procMemberLogin" />
             <input type="text" name="user_id" />
             <input type="password" name="password" />
+            <p>공공장소에서 이용 시 개인정보가 유출될 수 있으니 꼭 로그아웃을 해주세요.</p>
         </form>
         """
         let loggedInHTML = """

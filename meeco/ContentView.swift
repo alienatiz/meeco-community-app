@@ -2582,6 +2582,7 @@ final class MeecoAuthSession: ObservableObject {
 
     func prepareLoginForm() async {
         guard loginForm == nil else { return }
+        guard !isLoggedIn else { return }
         do {
             loginForm = try await service.fetchLoginForm()
             if case .checking = status {
@@ -2717,7 +2718,7 @@ struct AccountSettingsView: View {
                     }
                 }
 
-                if let loginForm = authSession.loginForm {
+                if !authSession.isLoggedIn, let loginForm = authSession.loginForm {
                     Section("계정 도움말") {
                         if let signUpURL = loginForm.signUpURL {
                             Button {
@@ -3274,17 +3275,31 @@ struct MeecoHTMLParser {
     }
 
     func authStatus(from html: String) -> MeecoAuthStatus {
-        if html.localizedCaseInsensitiveContains("procMemberLogout")
-            || html.localizedCaseInsensitiveContains("dispMemberLogout")
-            || html.localizedCaseInsensitiveContains("로그아웃") {
+        let hasLoginForm = loginForm(from: html, baseURL: MeecoService.loginFormURL) != nil
+        if hasConcreteLogoutAction(in: html)
+            || (!hasLoginForm && hasMemberInfoLink(in: html)) {
             return MeecoAuthStatus(isLoggedIn: true, displayName: loggedInDisplayName(from: html))
         }
 
-        if loginForm(from: html, baseURL: MeecoService.loginFormURL) != nil {
+        if hasLoginForm {
             return MeecoAuthStatus(isLoggedIn: false, displayName: nil)
         }
 
         return MeecoAuthStatus(isLoggedIn: false, displayName: nil)
+    }
+
+    private func hasConcreteLogoutAction(in html: String) -> Bool {
+        html.matches(
+            pattern: #"(?:href|action)\s*=\s*["'][^"']*(?:procMemberLogout|dispMemberLogout)[^"']*["']"#,
+            options: [.caseInsensitive]
+        ).isEmpty == false
+    }
+
+    private func hasMemberInfoLink(in html: String) -> Bool {
+        html.matches(
+            pattern: #"(?:href|action)\s*=\s*["'][^"']*dispMemberInfo[^"']*["']"#,
+            options: [.caseInsensitive]
+        ).isEmpty == false
     }
 
     private func loggedInDisplayName(from html: String) -> String? {
