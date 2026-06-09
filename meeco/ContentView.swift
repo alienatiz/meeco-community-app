@@ -127,46 +127,75 @@ struct RootNavigationBar: View {
     let onSearch: () -> Void
 
     var body: some View {
-        HStack(spacing: 12) {
-            HStack(spacing: 4) {
-                ForEach(MeecoAppTab.allCases) { tab in
-                    Button {
-                        selectedTab = tab
-                    } label: {
-                        VStack(spacing: 3) {
-                            Image(systemName: tab.systemImage)
-                                .font(.title3.weight(selectedTab == tab ? .bold : .semibold))
-                            Text(tab.title)
-                                .font(.caption.weight(selectedTab == tab ? .bold : .semibold))
+        BottomControlBackdrop {
+            HStack(spacing: 12) {
+                HStack(spacing: 4) {
+                    ForEach(MeecoAppTab.allCases) { tab in
+                        Button {
+                            selectedTab = tab
+                        } label: {
+                            VStack(spacing: 3) {
+                                Image(systemName: tab.systemImage)
+                                    .font(.title3.weight(selectedTab == tab ? .bold : .semibold))
+                                Text(tab.title)
+                                    .font(.caption.weight(selectedTab == tab ? .bold : .semibold))
+                            }
+                            .foregroundColor(selectedTab == tab ? .accentColor : .secondary)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 58)
                         }
-                        .foregroundColor(selectedTab == tab ? .accentColor : .secondary)
+                        .buttonStyle(.plain)
                         .frame(maxWidth: .infinity)
-                        .frame(height: 58)
+                        .accessibilityLabel(tab.title)
                     }
-                    .buttonStyle(.plain)
-                    .frame(maxWidth: .infinity)
-                    .accessibilityLabel(tab.title)
                 }
-            }
-            .padding(.horizontal, 8)
-            .frame(maxWidth: .infinity)
-            .frame(height: 64)
-            .boardLiquidGlass(cornerRadius: 32)
+                .padding(.horizontal, 8)
+                .frame(maxWidth: .infinity)
+                .frame(height: 64)
+                .boardLiquidGlass(cornerRadius: 32)
 
-            Button(action: onSearch) {
-                Image(systemName: "magnifyingglass")
-                    .font(.title2.weight(.bold))
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                Button(action: onSearch) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.title2.weight(.bold))
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+                .frame(width: 66, height: 66)
+                .rootProminentLiquidGlassButton()
+                .shadow(color: Color.accentColor.opacity(0.28), radius: 16, y: 6)
+                .accessibilityLabel("검색")
             }
-            .frame(width: 66, height: 66)
-            .rootProminentLiquidGlassButton()
-            .shadow(color: Color.accentColor.opacity(0.28), radius: 16, y: 6)
-            .accessibilityLabel("검색")
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+            .padding(.bottom, 10)
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 8)
-        .padding(.bottom, 10)
+    }
+}
+
+struct BottomControlBackdrop<Content: View>: View {
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        content
+            .frame(maxWidth: .infinity)
+            .background(alignment: .bottom) {
+                Rectangle()
+                    .fill(.ultraThinMaterial)
+                    .mask(
+                        LinearGradient(
+                            stops: [
+                                .init(color: .clear, location: 0.0),
+                                .init(color: .black.opacity(0.45), location: 0.28),
+                                .init(color: .black.opacity(0.88), location: 0.58),
+                                .init(color: .black, location: 1.0)
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                    .ignoresSafeArea(edges: .bottom)
+            }
+            .contentShape(Rectangle())
     }
 }
 
@@ -1233,43 +1262,45 @@ struct BoardBottomActionBar: View {
     let onCompose: () -> Void
 
     var body: some View {
-        HStack(spacing: 12) {
-            HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass")
-                    .foregroundColor(.secondary)
+        BottomControlBackdrop {
+            HStack(spacing: 12) {
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundColor(.secondary)
 
-                TextField("검색", text: $searchText)
-                    .font(.body.weight(.semibold))
-                    .textInputAutocapitalization(.never)
-                    .disableAutocorrection(true)
-                    .submitLabel(.search)
-                    .onSubmit(onSearch)
+                    TextField("검색", text: $searchText)
+                        .font(.body.weight(.semibold))
+                        .textInputAutocapitalization(.never)
+                        .disableAutocorrection(true)
+                        .submitLabel(.search)
+                        .onSubmit(onSearch)
 
-                Button(action: onSearch) {
-                    Image(systemName: "arrow.forward.circle.fill")
-                        .font(.title3)
+                    Button(action: onSearch) {
+                        Image(systemName: "arrow.forward.circle.fill")
+                            .font(.title3)
+                    }
+                    .disabled(searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .accessibilityLabel("검색")
                 }
-                .disabled(searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                .accessibilityLabel("검색")
-            }
-            .padding(.horizontal, 14)
-            .frame(height: 50)
-            .boardLiquidGlass(cornerRadius: 25)
-            .shadow(color: .black.opacity(0.12), radius: 18, y: 8)
+                .padding(.horizontal, 14)
+                .frame(height: 50)
+                .boardLiquidGlass(cornerRadius: 25)
+                .shadow(color: .black.opacity(0.12), radius: 18, y: 8)
 
-            Button(action: onCompose) {
-                Image(systemName: "square.and.pencil")
-                    .font(.title3.weight(.semibold))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                Button(action: onCompose) {
+                    Image(systemName: "square.and.pencil")
+                        .font(.title3.weight(.semibold))
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+                .frame(width: 50, height: 50)
+                .boardLiquidGlassButton()
+                .shadow(color: .black.opacity(0.14), radius: 18, y: 8)
+                .accessibilityLabel("글쓰기")
             }
-            .frame(width: 50, height: 50)
-            .boardLiquidGlassButton()
-            .shadow(color: .black.opacity(0.14), radius: 18, y: 8)
-            .accessibilityLabel("글쓰기")
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+            .padding(.bottom, 10)
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 8)
-        .padding(.bottom, 10)
     }
 }
 
@@ -2870,7 +2901,7 @@ struct MeecoService {
         var errorDescription: String? {
             switch self {
             case .invalidResponse:
-                return "서버 응답을 읽을 수 없습니다."
+                return "미코 서버 응답을 확인하지 못했습니다."
             case .emptyResult:
                 return "파싱된 내용이 없습니다."
             case .loginFailed:
@@ -2921,8 +2952,12 @@ struct MeecoService {
     }
 
     func fetchAuthStatus() async throws -> MeecoAuthStatus {
-        let html = try await fetchHTML(from: Self.loginFormURL)
-        return parser.authStatus(from: html)
+        if let cookieStatus = authStatusFromCookies() {
+            return cookieStatus
+        }
+        let html = try await fetchHTML(from: Self.loginFormURL, validatesStatus: false)
+        let status = parser.authStatus(from: html)
+        return status.isLoggedIn ? status : authStatusFromCookies() ?? status
     }
 
     func login(credentials: MeecoLoginCredentials, form: MeecoLoginForm) async throws -> MeecoAuthStatus {
@@ -2944,6 +2979,8 @@ struct MeecoService {
         request.timeoutInterval = 20
         request.httpShouldHandleCookies = true
         request.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15", forHTTPHeaderField: "User-Agent")
+        request.setValue(Self.loginFormURL.absoluteString, forHTTPHeaderField: "Referer")
+        request.setValue("https://meeco.kr", forHTTPHeaderField: "Origin")
 
         let encodedFields = formURLEncoded(fields)
         if request.httpMethod == "GET" {
@@ -2958,8 +2995,10 @@ struct MeecoService {
         }
 
         let (data, response) = try await URLSession.shared.data(for: request)
-        try validateHTTPResponse(response)
         await syncCookiesToWebViewStore(from: response, for: requestURL)
+        if let cookieStatus = authStatusFromCookies(), cookieStatus.isLoggedIn {
+            return cookieStatus
+        }
 
         guard let html = decodeHTML(data) else {
             throw ServiceError.invalidResponse
@@ -3005,7 +3044,7 @@ struct MeecoService {
         return components.url ?? url
     }
 
-    private func fetchHTML(from url: URL) async throws -> String {
+    private func fetchHTML(from url: URL, validatesStatus: Bool = true) async throws -> String {
         var request = URLRequest(url: url)
         request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
         request.timeoutInterval = 20
@@ -3015,7 +3054,9 @@ struct MeecoService {
         request.setValue("0", forHTTPHeaderField: "Expires")
 
         let (data, response) = try await URLSession.shared.data(for: request)
-        try validateHTTPResponse(response)
+        if validatesStatus {
+            try validateHTTPResponse(response)
+        }
         guard let html = decodeHTML(data) else {
             throw ServiceError.invalidResponse
         }
@@ -3062,6 +3103,20 @@ struct MeecoService {
                 WKWebsiteDataStore.default().httpCookieStore.setCookie(cookie)
             }
         }
+    }
+
+    private func authStatusFromCookies() -> MeecoAuthStatus? {
+        guard let cookie = HTTPCookieStorage.shared.cookies?
+            .first(where: { $0.domain.contains("meeco.kr") && $0.name == "rx_login_status" }) else {
+            return nil
+        }
+
+        let value = cookie.value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty, value.lowercased() != "none" else {
+            return MeecoAuthStatus(isLoggedIn: false, displayName: nil)
+        }
+
+        return MeecoAuthStatus(isLoggedIn: true, displayName: nil)
     }
 }
 
