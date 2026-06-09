@@ -342,6 +342,10 @@ struct MeecoBoard: Identifiable, Hashable {
     let allowedBoardPaths: Set<String>?
     var categories: [MeecoBoardCategory] = []
 
+    var showsSourceBoardBadges: Bool {
+        (allowedBoardPaths?.count ?? 0) > 1
+    }
+
     static let articleBoardPaths: Set<String> = [
         "Hot",
         "All",
@@ -655,6 +659,7 @@ struct MeecoPost: Identifiable, Equatable {
     let upvoteCount: Int
     let isNotice: Bool
     let isHot: Bool
+    var categoryColorHex: String? = nil
     var thumbnailURL: URL? = nil
 
     var commentURL: URL {
@@ -1118,7 +1123,7 @@ struct BoardView: View {
                                     if board.id == MeecoBoard.gallery.id {
                                         GalleryPostRow(post: post)
                                     } else {
-                                        PostRow(post: post)
+                                        PostRow(post: post, showsSourceBoardBadge: board.showsSourceBoardBadges)
                                     }
                                 }
                                 .onAppear {
@@ -1390,29 +1395,49 @@ struct CategoryTabBar: View {
 
 struct PostRow: View {
     let post: MeecoPost
+    var showsSourceBoardBadge = false
 
     private var isEndedDeal: Bool {
         post.isEndedSpecialDeal
     }
 
+    private var leadingBadge: (title: String, color: Color)? {
+        if let category = post.category?.nonEmpty {
+            return (category, post.categoryBadgeColor)
+        }
+
+        if showsSourceBoardBadge, let sourceBoardTitle = post.sourceBoardTitle {
+            return (sourceBoardTitle, post.sourceBoardBadgeColor)
+        }
+
+        if post.isNotice {
+            return ("공지", .meecoCrimson)
+        }
+
+        return nil
+    }
+
     var body: some View {
-        HStack(alignment: .center, spacing: 12) {
+        HStack(alignment: .center, spacing: 8) {
             VStack(alignment: .leading, spacing: 6) {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    if post.isNotice || post.isHot {
-                        Text(post.isNotice ? "공지" : "핫글")
-                            .font(.caption2.weight(.bold))
-                            .foregroundColor(isEndedDeal ? .secondary : (post.isNotice ? .accentColor : .pink))
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background((isEndedDeal ? Color.secondary : (post.isNotice ? Color.accentColor : Color.pink)).opacity(0.12))
-                            .clipShape(RoundedRectangle(cornerRadius: 4))
+                HStack(alignment: .firstTextBaseline, spacing: 5) {
+                    if let leadingBadge {
+                        PostBadge(
+                            title: leadingBadge.title,
+                            color: leadingBadge.color,
+                            isDimmed: isEndedDeal
+                        )
+                    }
+
+                    if post.isHot {
+                        PostBadge(title: "핫글", color: .red, isDimmed: isEndedDeal)
                     }
 
                     Text(post.title)
                         .font(.body)
                         .foregroundColor(isEndedDeal ? .secondary : .primary)
                         .lineLimit(2)
+                        .layoutPriority(1)
                 }
 
                 Text([post.nickname, post.date].filter { !$0.isEmpty }.joined(separator: " "))
@@ -1420,12 +1445,31 @@ struct PostRow: View {
                     .foregroundColor(.secondary.opacity(isEndedDeal ? 0.72 : 1))
                     .lineLimit(1)
             }
-
-            Spacer(minLength: 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .layoutPriority(1)
 
             PostStatsColumn(commentCount: post.commentCount, upvoteCount: post.upvoteCount, isDimmed: isEndedDeal)
         }
         .padding(.vertical, 6)
+    }
+}
+
+struct PostBadge: View {
+    let title: String
+    let color: Color
+    let isDimmed: Bool
+
+    var body: some View {
+        Text(title)
+            .font(.caption2.weight(.bold))
+            .foregroundColor(.white)
+            .lineLimit(1)
+            .minimumScaleFactor(0.75)
+            .padding(.horizontal, 6)
+            .frame(minWidth: 34, minHeight: 18, maxHeight: 18)
+            .fixedSize(horizontal: true, vertical: false)
+            .background((isDimmed ? Color.secondary : color).opacity(isDimmed ? 0.55 : 0.92))
+            .clipShape(RoundedRectangle(cornerRadius: 4))
     }
 }
 
@@ -1529,7 +1573,7 @@ struct PostStatsColumn: View {
             statRow(systemImage: "heart.fill", count: upvoteCount, color: .pink)
             statRow(systemImage: "text.bubble", count: commentCount ?? 0, color: .accentColor)
         }
-        .frame(width: 58, alignment: .trailing)
+        .fixedSize(horizontal: true, vertical: false)
         .font(.caption.weight(.semibold))
     }
 
@@ -1544,7 +1588,7 @@ struct PostStatsColumn: View {
             }
             .foregroundColor(isDimmed ? .secondary : color)
         } else {
-            Color.clear.frame(height: 14)
+            Color.clear.frame(width: 0, height: 14)
         }
     }
 }
@@ -3388,6 +3432,11 @@ struct MeecoHTMLParser {
         let commentCount = inferCommentCount(from: rowHTML, title: title)
         let upvoteCount = inferPostUpvoteCount(from: rowHTML, cells: cells, title: title, date: date, nickname: nickname)
         let loweredRow = rowText.lowercased()
+        let categoryID = anchor.categoryID ?? rowCategoryID(rowHTML)
+        let category = rowCategoryTitle(rowHTML)
+            ?? categoryLinkTitle(rowHTML: rowHTML, categoryID: categoryID)
+            ?? inferCategory(from: cells, title: title)
+            ?? categoryTitle(forCategoryID: categoryID)
 
         return MeecoPost(
             id: anchor.url,
@@ -3397,11 +3446,12 @@ struct MeecoHTMLParser {
             date: date,
             url: anchor.url,
             boardPath: anchor.boardPath,
-            category: inferCategory(from: cells, title: title) ?? anchor.categoryID,
+            category: category,
             commentCount: commentCount,
             upvoteCount: upvoteCount,
             isNotice: isNoticeRow(rowHTML),
             isHot: loweredRow.contains("핫글") || loweredRow.contains("hot"),
+            categoryColorHex: categoryColorHex(from: rowHTML, category: category, categoryID: categoryID),
             thumbnailURL: thumbnailURL(from: rowHTML, baseURL: baseURL)
         )
     }
@@ -3421,11 +3471,12 @@ struct MeecoHTMLParser {
                 date: "",
                 url: anchor.url,
                 boardPath: anchor.boardPath,
-                category: anchor.categoryID,
+                category: categoryTitle(forCategoryID: anchor.categoryID),
                 commentCount: nil,
                 upvoteCount: 0,
                 isNotice: false,
                 isHot: false,
+                categoryColorHex: categoryColorHex(forCategoryID: anchor.categoryID),
                 thumbnailURL: nil
             )
         }
@@ -3530,8 +3581,19 @@ struct MeecoHTMLParser {
         )?.plainHTMLText
     }
 
-    private func categoryLinkTitle(rowHTML: String, categoryID: String) -> String? {
+    private func rowCategoryID(_ rowHTML: String) -> String? {
         rowHTML.firstMatch(
+            pattern: #"/category/(\d+)"#,
+            options: [.caseInsensitive]
+        ) ?? rowHTML.firstMatch(
+            pattern: #"category=(\d+)"#,
+            options: [.caseInsensitive]
+        )
+    }
+
+    private func categoryLinkTitle(rowHTML: String, categoryID: String?) -> String? {
+        guard let categoryID else { return nil }
+        return rowHTML.firstMatch(
             pattern: #"<a\b[^>]*href=[\"'][^\"']*/category/\#(categoryID)(?:[?/#][^\"']*)?[\"'][^>]*>(.*?)</a>"#,
             group: 1,
             options: [.caseInsensitive, .dotMatchesLineSeparators]
@@ -3733,6 +3795,76 @@ struct MeecoHTMLParser {
 
         let candidate = cells[titleIndex - 1]
         return candidate.isLikelyCategory ? candidate : nil
+    }
+
+    private func categoryColorHex(from rowHTML: String, category: String?, categoryID: String?) -> String? {
+        if let categoryID,
+           let color = rowHTML.firstMatch(
+            pattern: #"/category/\#(categoryID)[^\"']*[\"'][^>]*>.*?color\s*:\s*(#[0-9A-Fa-f]{6})"#,
+            group: 1,
+            options: [.caseInsensitive, .dotMatchesLineSeparators]
+           ) {
+            return color
+        }
+
+        if let category,
+           let color = rowHTML.firstMatch(
+            pattern: #"<(?:a|span)\b[^>]*>.*?color\s*:\s*(#[0-9A-Fa-f]{6}).*?\#(NSRegularExpression.escapedPattern(for: category))"#,
+            group: 1,
+            options: [.caseInsensitive, .dotMatchesLineSeparators]
+           ) {
+            return color
+        }
+
+        return categoryColorHex(forCategoryID: categoryID) ?? categoryColorHex(forCategoryTitle: category)
+    }
+
+    private func categoryColorHex(forCategoryID categoryID: String?) -> String? {
+        guard let categoryID else { return nil }
+        return [
+            "23941713": "#9bd0ff",
+            "36923546": "#e69138",
+            "23941775": "#ff0099",
+            "28110654": "#68e033",
+            "28110676": "#f6b26b",
+            "28110645": "#9fc5e8",
+            "38624667": "#35a5bd",
+            "38624668": "#990000",
+            "32500992": "#ff99cc",
+            "37269169": "#126aba"
+        ][categoryID]
+    }
+
+    private func categoryColorHex(forCategoryTitle category: String?) -> String? {
+        guard let category else { return nil }
+        return [
+            "미니": "#9bd0ff",
+            "음향": "#e69138",
+            "공지": "#ff0099",
+            "차량": "#68e033",
+            "TV": "#f6b26b",
+            "생활": "#9fc5e8",
+            "AI": "#35a5bd",
+            "로봇": "#990000",
+            "리뷰": "#ff99cc",
+            "강의": "#126aba"
+        ][category]
+    }
+
+    private func categoryTitle(forCategoryID categoryID: String?) -> String? {
+        guard let categoryID else { return nil }
+        return [
+            "23941713": "미니",
+            "36923546": "음향",
+            "23941775": "공지",
+            "28110654": "차량",
+            "28110676": "TV",
+            "28110645": "생활",
+            "38624667": "AI",
+            "38624668": "로봇",
+            "32500992": "리뷰",
+            "37269169": "강의"
+        ][categoryID]
     }
 
     private func titleFromCells(_ cells: [String], excluding documentID: String) -> String? {
@@ -4245,6 +4377,7 @@ struct MeecoHTMLParser {
             upvoteCount: max(current.upvoteCount, candidate.upvoteCount),
             isNotice: current.isNotice || candidate.isNotice,
             isHot: current.isHot || candidate.isHot,
+            categoryColorHex: current.categoryColorHex ?? candidate.categoryColorHex,
             thumbnailURL: current.thumbnailURL ?? candidate.thumbnailURL
         )
     }
@@ -4418,6 +4551,82 @@ private extension String {
 private extension Set where Element == String {
     var boardIDStorageValue: String {
         sorted().joined(separator: ",")
+    }
+}
+
+private extension MeecoPost {
+    var categoryBadgeColor: Color {
+        categoryColorHex.flatMap(Color.init(hex:)) ?? (isNotice ? .meecoCrimson : .accentColor)
+    }
+
+    var sourceBoardTitle: String? {
+        switch boardPath {
+        case "news": return "IT소식"
+        case "mini": return "미니"
+        case "Review": return "리뷰"
+        case "big": return "대형"
+        case "AI": return "AI"
+        case "free": return "자유"
+        case "humor": return "유머"
+        case "Gallery": return "갤러리"
+        case "anonymous": return "익명"
+        case "Price": return "특가"
+        case "Purchase": return "구매"
+        case "market": return "장터"
+        case "Enterprise": return "홍보"
+        case "Event": return "이벤트"
+        case "BugUpdate": return "개선"
+        case "notice": return "공지"
+        case "Makgora": return "막고라"
+        case "Balloon": return "도네"
+        default: return nil
+        }
+    }
+
+    var sourceBoardBadgeColor: Color {
+        switch boardPath {
+        case "news": return .blue
+        case "mini": return .cyan
+        case "Review": return .pink
+        case "big": return .orange
+        case "AI": return .teal
+        case "free": return .green
+        case "humor": return .yellow
+        case "Gallery": return .purple
+        case "anonymous": return .gray
+        case "Price": return .red
+        case "Purchase": return .mint
+        case "market": return .brown
+        case "Enterprise": return .indigo
+        case "Event": return .pink
+        case "BugUpdate": return .blue
+        case "notice": return .meecoCrimson
+        case "Makgora": return .orange
+        case "Balloon": return .purple
+        default: return .accentColor
+        }
+    }
+}
+
+private extension Color {
+    static let meecoCrimson = Color(red: 1.0, green: 0.0, blue: 0.6)
+
+    init?(hex: String) {
+        var normalized = hex.trimmingCharacters(in: .whitespacesAndNewlines)
+        if normalized.hasPrefix("#") {
+            normalized.removeFirst()
+        }
+
+        guard normalized.count == 6,
+              let value = Int(normalized, radix: 16) else {
+            return nil
+        }
+
+        self.init(
+            red: Double((value >> 16) & 0xff) / 255.0,
+            green: Double((value >> 8) & 0xff) / 255.0,
+            blue: Double(value & 0xff) / 255.0
+        )
     }
 }
 

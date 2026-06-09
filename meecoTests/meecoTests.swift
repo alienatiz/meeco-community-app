@@ -507,7 +507,8 @@ final class meecoTests: XCTestCase {
         )
 
         XCTAssertEqual(posts.map(\.title), ["음향 게시물", "음향 공지"])
-        XCTAssertEqual(posts.map(\.category), ["36923546", "36923546"])
+        XCTAssertEqual(posts.map(\.category), ["음향", "음향"])
+        XCTAssertEqual(posts.map(\.categoryColorHex), ["#e69138", "#e69138"])
     }
 
     func testParserFiltersMiniNoticeTabToVisibleNoticeRows() throws {
@@ -610,8 +611,45 @@ final class meecoTests: XCTestCase {
         )
 
         XCTAssertEqual(posts.map(\.title), ["카테고리 핫글"])
+        XCTAssertEqual(posts.first?.nickname, "작성자")
+        XCTAssertEqual(posts.first?.date, "11:14")
+        XCTAssertEqual(posts.first?.category, "미니")
+        XCTAssertEqual(posts.first?.categoryColorHex, "#9bd0ff")
         XCTAssertEqual(posts.first?.upvoteCount, 10)
         XCTAssertEqual(posts.first?.isHot, true)
+    }
+
+    func testParserMergesPromotedRowWithLaterAuthorAndDate() throws {
+        let html = """
+        <tr>
+            <td class=\"num\"><span style=\"background-color: #ff0000;border-radius: 3px;color:#fff;padding: 2px;\">핫글</span></td>
+            <td class=\"category\"><a href=\"/mini/category/23941713?page=1\"><span style=\"font-size: 11px; color:#9bd0ff\"><i class=\"xi-full-moon\"></i> </span>미니</a></td>
+            <td class=\"title\"><a href=\"/mini/41488615?page=1\">핫글 제목</a></td>
+        </tr>
+        <tr>
+            <td class=\"num\">245500</td>
+            <td class=\"category\"><a href=\"/mini/category/23941713?page=1\"><span style=\"font-size: 11px; color:#9bd0ff\"><i class=\"xi-full-moon\"></i> </span>미니</a></td>
+            <td class=\"title\"><a class=\"title_a\" href=\"/mini/41488615?page=1\">핫글 제목</a></td>
+            <td class=\"author\"><a href=\"#popup_menu_area\" class=\"member_270\">Stellist</a></td>
+            <td class=\"num\">16:16</td>
+            <td class=\"num\"><span>613</span></td>
+            <td class=\"num\"><span style=\"color:#ff0066;\">10</span></td>
+        </tr>
+        """
+
+        let posts = MeecoHTMLParser().posts(
+            from: html,
+            baseURL: URL(string: "https://meeco.kr/mini")!,
+            allowedBoardPaths: ["mini"]
+        )
+
+        XCTAssertEqual(posts.count, 1)
+        XCTAssertEqual(posts.first?.nickname, "Stellist")
+        XCTAssertEqual(posts.first?.date, "16:16")
+        XCTAssertEqual(posts.first?.category, "미니")
+        XCTAssertEqual(posts.first?.categoryColorHex, "#9bd0ff")
+        XCTAssertEqual(posts.first?.isHot, true)
+        XCTAssertEqual(posts.first?.upvoteCount, 10)
     }
 
     func testParserAppliesCategoryLabelsAcrossTabbedBoards() throws {
@@ -666,6 +704,42 @@ final class meecoTests: XCTestCase {
 
         XCTAssertEqual(posts.map(\.title), ["음향 게시물"])
         XCTAssertEqual(posts.first?.category, "음향")
+    }
+
+    func testParserReadsCategoryLabelsFromOverallBoardRows() throws {
+        let listHTML = """
+        <li>
+            <span class=\"list_ctg\" style=\"background:#9bd0ff\">미니</span>
+            <a class=\"list_link\" href=\"/mini/41490040\" title=\"미니 전체 글\"></a>
+            <div class=\"list_info\"><span>작성자</span><span>26.06.08</span></div>
+        </li>
+        """
+        let tableHTML = """
+        <tr>
+            <td class=\"title\">
+                <a class=\"category\" href=\"/mini/category/36923546\">음향</a>
+                <a class=\"title_a\" href=\"/mini/41490041\">음향 전체 글</a>
+            </td>
+            <td class=\"author\">작성자</td>
+            <td class=\"num\">26.06.08</td>
+        </tr>
+        """
+
+        let listPosts = MeecoHTMLParser().posts(
+            from: listHTML,
+            baseURL: URL(string: "https://meeco.kr/mini")!,
+            allowedBoardPaths: ["mini"]
+        )
+        let tablePosts = MeecoHTMLParser().posts(
+            from: tableHTML,
+            baseURL: URL(string: "https://meeco.kr/mini")!,
+            allowedBoardPaths: ["mini"]
+        )
+        let posts = listPosts + tablePosts
+
+        XCTAssertEqual(posts.map(\.title), ["미니 전체 글", "음향 전체 글"])
+        XCTAssertEqual(posts.map(\.category), ["미니", "음향"])
+        XCTAssertEqual(posts.map(\.categoryColorHex), ["#9bd0ff", "#e69138"])
     }
 
     func testAuthenticatedActionURLsUseMeecoForms() throws {
