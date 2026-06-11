@@ -864,6 +864,8 @@ struct MeecoAttendanceSnapshot: Equatable {
     let statusMessage: String
     let isCheckedInToday: Bool
     let cumulativeAttendanceDays: Int?
+    let perfectAttendanceDays: Int?
+    let totalAttendanceDays: Int?
     let attendedDates: [String]
     let records: [MeecoAttendanceRecord]
     let fetchedAt: Date
@@ -876,6 +878,8 @@ struct MeecoAttendanceRecord: Identifiable, Equatable {
     let message: String
     let time: String
     let points: Int?
+    let perfectAttendanceDays: Int?
+    let totalAttendanceDays: Int?
 }
 
 struct MeecoNotificationSnapshot: Equatable {
@@ -2919,6 +2923,7 @@ final class AttendanceViewModel: ObservableObject {
 
     @Published private(set) var snapshot: MeecoAttendanceSnapshot?
     @Published private(set) var state: LoadingState = .idle
+    @Published private(set) var isCheckingIn = false
 
     private let service: MeecoService
 
@@ -2926,15 +2931,28 @@ final class AttendanceViewModel: ObservableObject {
         self.service = service
     }
 
-    func load() async {
+    func load(accountDisplayName: String? = nil) async {
         guard state != .loading else { return }
         state = .loading
         do {
-            snapshot = try await service.fetchAttendanceSnapshot()
+            snapshot = try await service.fetchAttendanceSnapshot(accountDisplayName: accountDisplayName)
             state = .loaded
         } catch {
             state = .failed(error.localizedDescription)
         }
+    }
+
+    func checkIn(accountDisplayName: String? = nil) async {
+        guard !isCheckingIn else { return }
+        isCheckingIn = true
+        state = .loading
+        do {
+            snapshot = try await service.submitAttendance(greeting: "출석합니다", accountDisplayName: accountDisplayName)
+            state = .loaded
+        } catch {
+            state = .failed(error.localizedDescription)
+        }
+        isCheckingIn = false
     }
 }
 
@@ -3171,9 +3189,6 @@ struct NotificationRow: View {
 struct AttendanceView: View {
     @EnvironmentObject private var authSession: MeecoAuthSession
     @StateObject private var viewModel = AttendanceViewModel()
-    @State private var webAction: MeecoWebAction?
-
-    private let attendanceURL = URL(string: "https://meeco.kr/attendance")!
 
     var body: some View {
         List {
@@ -3216,7 +3231,7 @@ struct AttendanceView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button {
-                    Task { await viewModel.load() }
+                    Task { await viewModel.load(accountDisplayName: authSession.accountDisplayName) }
                 } label: {
                     Image(systemName: "arrow.clockwise")
                 }
@@ -3224,19 +3239,23 @@ struct AttendanceView: View {
                 .accessibilityLabel("새로고침")
             }
         }
-        .sheet(item: $webAction) { action in
-            WebActionView(action: action)
-        }
         .task {
             await authSession.verifySession()
             if authSession.isLoggedIn {
-                await viewModel.load()
+                await viewModel.load(accountDisplayName: authSession.accountDisplayName)
             }
         }
         .refreshable {
             if authSession.isLoggedIn {
-                await viewModel.load()
+                await viewModel.load(accountDisplayName: authSession.accountDisplayName)
             }
+        }
+    }
+
+    private func currentUserRecord(in snapshot: MeecoAttendanceSnapshot) -> MeecoAttendanceRecord? {
+        guard let displayName = authSession.accountDisplayName?.nonEmpty else { return nil }
+        return snapshot.records.first { record in
+            record.nickname.compare(displayName, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame
         }
     }
 
@@ -3257,7 +3276,7 @@ struct AttendanceView: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
                 Button {
-                    Task { await viewModel.load() }
+                    Task { await viewModel.load(accountDisplayName: authSession.accountDisplayName) }
                 } label: {
                     Label("다시 시도", systemImage: "arrow.clockwise")
                 }
@@ -3266,6 +3285,9 @@ struct AttendanceView: View {
             .padding(.vertical, 4)
         default:
             if let snapshot = viewModel.snapshot {
+                let currentUserRecord = currentUserRecord(in: snapshot)
+                let perfectAttendanceDays = currentUserRecord?.perfectAttendanceDays ?? snapshot.perfectAttendanceDays
+                let totalAttendanceDays = currentUserRecord?.totalAttendanceDays ?? snapshot.totalAttendanceDays ?? snapshot.cumulativeAttendanceDays
                 VStack(alignment: .leading, spacing: 12) {
                     Label(
                         snapshot.statusMessage,
@@ -3274,8 +3296,13 @@ struct AttendanceView: View {
                     .font(.headline)
                     .foregroundColor(snapshot.isCheckedInToday ? .green : .accentColor)
 
-                    if let cumulativeAttendanceDays = snapshot.cumulativeAttendanceDays {
-                        Label("누적 출석 \(cumulativeAttendanceDays)일", systemImage: "calendar")
+                    if let perfectAttendanceDays {
+                        Label("연속 출석 \(perfectAttendanceDays)일", systemImage: "flame.fill")
+                            .font(.subheadline.weight(.semibold))
+                    }
+
+                    if let totalAttendanceDays {
+                        Label("총 출석 \(totalAttendanceDays)일", systemImage: "calendar")
                             .font(.subheadline.weight(.semibold))
                     }
 
@@ -3295,12 +3322,27 @@ struct AttendanceView: View {
                         .font(.caption)
                         .foregroundColor(.secondary)
 
-                    Button {
-                        webAction = MeecoWebAction(title: "출석 체크", url: attendanceURL)
-                    } label: {
-                        Label(snapshot.isCheckedInToday ? "출석부 열기" : "출석 체크", systemImage: "safari")
+                    if snapshot.isCheckedInToday {
+                        Button {
+                            Task { await viewModel.load(accountDisplayName: authSession.accountDisplayName) }
+                        } label: {
+                            Label("출석 정보 새로고침", systemImage: "arrow.clockwise")
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(viewModel.state == .loading)
+                    } else {
+                        Button {
+                            Task { await viewModel.checkIn(accountDisplayName: authSession.accountDisplayName) }
+                        } label: {
+                            if viewModel.isCheckingIn {
+                                Label("출석 체크 중", systemImage: "hourglass")
+                            } else {
+                                Label("출석 체크", systemImage: "checkmark.circle.fill")
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(viewModel.isCheckingIn || viewModel.state == .loading)
                     }
-                    .buttonStyle(.borderedProminent)
                 }
                 .padding(.vertical, 4)
             }
@@ -3342,6 +3384,19 @@ struct AttendanceRecordRow: View {
                         .font(.caption)
                         .foregroundColor(.secondary)
                         .lineLimit(2)
+                }
+
+                let detailText = [
+                    record.perfectAttendanceDays.map { "\($0)일째" },
+                    record.totalAttendanceDays.map { "총 \($0)일" }
+                ]
+                .compactMap { $0 }
+                .joined(separator: " · ")
+
+                if !detailText.isEmpty {
+                    Text(detailText)
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
                 }
             }
 
@@ -3652,10 +3707,48 @@ struct MeecoService {
         return parser.postDetail(from: html, fallbackPost: post)
     }
 
-    func fetchAttendanceSnapshot() async throws -> MeecoAttendanceSnapshot {
+    func fetchAttendanceSnapshot(accountDisplayName: String? = nil) async throws -> MeecoAttendanceSnapshot {
         await syncWebViewCookiesToSharedStorage()
         let html = try await fetchHTML(from: cacheBypassedURL(from: Self.attendanceURL), validatesStatus: false)
-        return parser.attendanceSnapshot(from: html)
+        return parser.attendanceSnapshot(from: html, accountDisplayName: accountDisplayName)
+    }
+
+    func submitAttendance(greeting: String, accountDisplayName: String? = nil) async throws -> MeecoAttendanceSnapshot {
+        await syncWebViewCookiesToSharedStorage()
+
+        let requestURL = URL(string: "https://meeco.kr/")!
+        var request = URLRequest(url: requestURL)
+        request.httpMethod = "POST"
+        request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+        request.timeoutInterval = 20
+        request.httpShouldHandleCookies = true
+        request.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15", forHTTPHeaderField: "User-Agent")
+        request.setValue(Self.attendanceURL.absoluteString, forHTTPHeaderField: "Referer")
+        request.setValue("https://meeco.kr", forHTTPHeaderField: "Origin")
+        request.setValue("application/x-www-form-urlencoded; charset=utf-8", forHTTPHeaderField: "Content-Type")
+
+        request.httpBody = formURLEncoded([
+            "error_return_url": "/attendance",
+            "success_return_url": Self.attendanceURL.absoluteString,
+            "mid": "attendance",
+            "act": "procAttendanceInsertAttendance",
+            "xe_validator_id": "modules/attendance/skins/default/attendanceinsert",
+            "greetings": greeting,
+            "about_position": "yes"
+        ]).data(using: .utf8)
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validateHTTPResponse(response)
+        await syncCookiesToWebViewStore(from: response, for: requestURL)
+
+        if let html = decodeHTML(data) {
+            let snapshot = parser.attendanceSnapshot(from: html, accountDisplayName: accountDisplayName)
+            if snapshot.isCheckedInToday {
+                return snapshot
+            }
+        }
+
+        return try await fetchAttendanceSnapshot(accountDisplayName: accountDisplayName)
     }
 
     func fetchNotificationSnapshot() async throws -> MeecoNotificationSnapshot {
@@ -3936,14 +4029,20 @@ struct MeecoHTMLParser {
         )
     }
 
-    func attendanceSnapshot(from html: String) -> MeecoAttendanceSnapshot {
+    func attendanceSnapshot(from html: String, accountDisplayName: String? = nil) -> MeecoAttendanceSnapshot {
         let plainText = html.plainHTMLText
-        let isCheckedInToday = attendanceCheckedIn(from: plainText)
         let records = attendanceRecords(from: html)
+        let currentUserRecord = attendanceRecord(for: accountDisplayName, in: records)
+        let isCheckedInToday = attendanceCheckedIn(from: plainText)
+            || attendanceCheckedIn(fromHTML: html)
+            || currentUserRecord != nil
+        let totalAttendanceDays = totalAttendanceDays(from: plainText)
         return MeecoAttendanceSnapshot(
             statusMessage: attendanceStatusMessage(from: plainText, isCheckedInToday: isCheckedInToday),
             isCheckedInToday: isCheckedInToday,
-            cumulativeAttendanceDays: cumulativeAttendanceDays(from: plainText),
+            cumulativeAttendanceDays: totalAttendanceDays,
+            perfectAttendanceDays: perfectAttendanceDays(from: plainText),
+            totalAttendanceDays: totalAttendanceDays,
             attendedDates: attendedDates(from: plainText),
             records: records,
             fetchedAt: Date()
@@ -4077,12 +4176,77 @@ struct MeecoHTMLParser {
 
     private func attendanceCheckedIn(from text: String) -> Bool {
         let lowered = text.lowercased()
+        let checkedPatterns = [
+            #"출석\s*여부\s*[:：]?\s*(?:출석\s*완료|출석|완료)"#,
+            #"오늘\s*출석\s*(?:완료|했습니다|하였습니다|됨)"#,
+            #"금일\s*출석\s*(?:완료|했습니다|하였습니다|됨)"#,
+            #"출석\s*(?:체크|등록)(?:가|이)?\s*(?:완료|되었습니다)"#,
+            #"출석\s*(?:하셨습니다|했습니다|하였습니다)"#,
+            #"attend_(?:success|already_checked)"#
+        ]
         return text.contains("출석완료")
             || text.contains("출석 완료")
             || text.contains("이미 출석")
-            || text.contains("오늘 출석")
+            || checkedPatterns.contains { text.firstMatch(pattern: $0, options: [.caseInsensitive]) != nil }
             || lowered.contains("checked")
             || lowered.contains("already")
+    }
+
+    private func attendanceCheckedIn(fromHTML html: String) -> Bool {
+        let statusCells = html.matches(
+            pattern: #"<th\b[^>]*>\s*출석\s*여부\s*</th>\s*<td\b[^>]*>(.*?)</td>"#,
+            options: [.caseInsensitive, .dotMatchesLineSeparators]
+        )
+        .compactMap { $0.count > 1 ? $0[1].plainHTMLText : nil }
+
+        if statusCells.contains(where: attendanceStatusLooksChecked) {
+            return true
+        }
+
+        let statusRows = html.matches(
+            pattern: #"<tr\b[^>]*>(.*?)</tr>"#,
+            options: [.caseInsensitive, .dotMatchesLineSeparators]
+        )
+        .compactMap { $0.count > 1 ? $0[1] : nil }
+        .filter { rowHTML in
+            rowHTML.plainHTMLText
+                .replacingOccurrences(of: #"\s+"#, with: "", options: .regularExpression)
+                .contains("출석여부")
+        }
+
+        return statusRows.contains { rowHTML in
+            let statusText = rowHTML.plainHTMLText
+                .replacingOccurrences(of: #"출석\s*여부"#, with: "", options: .regularExpression)
+            return attendanceStatusLooksChecked(statusText)
+        }
+    }
+
+    private func attendanceStatusLooksChecked(_ status: String) -> Bool {
+        let normalized = status.plainHTMLText
+            .replacingOccurrences(of: #"\s+"#, with: "", options: .regularExpression)
+            .lowercased()
+
+        let uncheckedTokens = [
+            "미출석",
+            "비로그인",
+            "로그인필요",
+            "출석전",
+            "출석가능",
+            "unchecked"
+        ]
+        if uncheckedTokens.contains(where: normalized.contains) {
+            return false
+        }
+
+        let checkedTokens = [
+            "출석완료",
+            "출석",
+            "완료",
+            "이미출석",
+            "checked",
+            "already"
+        ]
+        return checkedTokens.contains(where: normalized.contains)
     }
 
     private func attendanceStatusMessage(from text: String, isCheckedInToday: Bool) -> String {
@@ -4097,18 +4261,57 @@ struct MeecoHTMLParser {
         return "오늘 출석 전"
     }
 
-    private func cumulativeAttendanceDays(from text: String) -> Int? {
+    private func attendanceRecord(for accountDisplayName: String?, in records: [MeecoAttendanceRecord]) -> MeecoAttendanceRecord? {
+        guard let normalizedDisplayName = normalizedAttendanceNickname(accountDisplayName), !normalizedDisplayName.isEmpty else {
+            return nil
+        }
+        return records.first { normalizedAttendanceNickname($0.nickname) == normalizedDisplayName }
+    }
+
+    private func normalizedAttendanceNickname(_ nickname: String?) -> String? {
+        nickname?
+            .plainHTMLText
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+    }
+
+    private func perfectAttendanceDays(from text: String, allowsLooseStreak: Bool = false) -> Int? {
+        var patterns = [
+            #"개근(?:일|일수)?\s*[:：]?\s*(\d+)\s*일"#,
+            #"연속\s*출석(?:일|일수)?\s*[:：]?\s*(\d+)\s*일"#,
+            #"(\d+)\s*일\s*(?:연속|개근)"#
+        ]
+        if allowsLooseStreak {
+            patterns.append(#"(\d+)\s*일째"#)
+        }
+
+        return patterns
+            .lazy
+            .compactMap { integerMatch(in: text, pattern: $0) }
+            .first
+    }
+
+    private func totalAttendanceDays(from text: String) -> Int? {
         let patterns = [
-            #"누적\s*출석(?:일|일수)?\s*[:：]?\s*(\d+)\s*일"#,
-            #"총\s*출석(?:일|일수)?\s*[:：]?\s*(\d+)\s*일"#,
-            #"출석(?:일|일수)\s*[:：]?\s*(\d+)\s*일"#,
-            #"(\d+)\s*일\s*(?:연속|누적)?\s*출석"#
+            #"총\s*출석일(?:이)?\s*([\d,]+)\s*일째"#,
+            #"누적\s*출석(?:일|일수)?\s*[:：]?\s*([\d,]+)\s*일"#,
+            #"총\s*출석(?:일|일수)?\s*[:：]?\s*([\d,]+)\s*일"#,
+            #"출석(?:일|일수)\s*[:：]?\s*([\d,]+)\s*일"#,
+            #"([\d,]+)\s*일\s*누적\s*출석"#
         ]
 
         return patterns
             .lazy
-            .compactMap { text.firstMatch(pattern: $0).flatMap(Int.init) }
+            .compactMap { integerMatch(in: text, pattern: $0) }
             .first
+    }
+
+    private func integerMatch(in text: String, pattern: String) -> Int? {
+        guard let value = text.firstMatch(pattern: pattern) else {
+            return nil
+        }
+        return Int(value.replacingOccurrences(of: ",", with: ""))
     }
 
     private func attendedDates(from text: String) -> [String] {
@@ -4165,7 +4368,12 @@ struct MeecoHTMLParser {
             return nil
         }
 
-        let rank = cleanedFields.first.flatMap { Int($0) }
+        let rank = cleanedFields.first.flatMap { field -> Int? in
+            if let rank = Int(field) {
+                return rank
+            }
+            return field.firstMatch(pattern: #"^(\d+)\s*등"#).flatMap(Int.init)
+        }
         let time = cleanedFields.first(where: { $0.isPostDate || $0.firstMatch(pattern: #"\d{1,2}:\d{2}"#) != nil }) ?? ""
         let points = cleanedFields
             .compactMap { field -> Int? in
@@ -4178,6 +4386,9 @@ struct MeecoHTMLParser {
         let nickname = cleanedFields.first { field in
             field != time
                 && Int(field) == nil
+                && field.firstMatch(pattern: #"^\d+\s*등$"#) == nil
+                && self.perfectAttendanceDays(from: field, allowsLooseStreak: true) == nil
+                && self.totalAttendanceDays(from: field) == nil
                 && field.firstMatch(pattern: #"([+-]?\d+\s*(?:포인트|point|pt|p))"#, options: [.caseInsensitive]) == nil
                 && !field.localizedCaseInsensitiveContains("출석")
         } ?? ""
@@ -4186,9 +4397,18 @@ struct MeecoHTMLParser {
                 field != nickname
                     && field != time
                     && Int(field) == nil
+                    && field.firstMatch(pattern: #"^\d+\s*등$"#) == nil
+                    && self.perfectAttendanceDays(from: field, allowsLooseStreak: true) == nil
+                    && self.totalAttendanceDays(from: field) == nil
                     && field.firstMatch(pattern: #"([+-]?\d+\s*(?:포인트|point|pt|p))"#, options: [.caseInsensitive]) == nil
             }
             .max { $0.count < $1.count } ?? ""
+        let perfectAttendanceDays = cleanedFields
+            .compactMap { field in self.perfectAttendanceDays(from: field, allowsLooseStreak: true) }
+            .first
+        let totalAttendanceDays = cleanedFields
+            .compactMap { field in self.totalAttendanceDays(from: field) }
+            .first
 
         guard !nickname.isEmpty else { return nil }
         return MeecoAttendanceRecord(
@@ -4196,7 +4416,9 @@ struct MeecoHTMLParser {
             nickname: nickname,
             message: message,
             time: time,
-            points: points
+            points: points,
+            perfectAttendanceDays: perfectAttendanceDays,
+            totalAttendanceDays: totalAttendanceDays
         )
     }
 

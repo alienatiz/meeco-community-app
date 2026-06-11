@@ -865,6 +865,7 @@ final class meecoTests: XCTestCase {
         XCTAssertTrue(snapshot.isCheckedInToday)
         XCTAssertEqual(snapshot.statusMessage, "오늘 출석 완료")
         XCTAssertEqual(snapshot.cumulativeAttendanceDays, 128)
+        XCTAssertEqual(snapshot.totalAttendanceDays, 128)
         XCTAssertEqual(snapshot.attendedDates.prefix(2), ["2026.06.08", "2026.06.07"])
         XCTAssertEqual(snapshot.records.count, 2)
         XCTAssertEqual(snapshot.records[0].rank, 1)
@@ -872,6 +873,128 @@ final class meecoTests: XCTestCase {
         XCTAssertEqual(snapshot.records[0].message, "출석합니다")
         XCTAssertEqual(snapshot.records[0].time, "09:10")
         XCTAssertEqual(snapshot.records[0].points, 10)
+    }
+
+    func testParserReadsCheckedAttendanceAndPersonalCountsFromAttendanceRow() throws {
+        let html = """
+        <section>
+            <table>
+                <tr><th>출석여부</th><td>출석</td></tr>
+            </table>
+            <ul>
+                <li>
+                    <span>39등</span>
+                    <strong>AlieNaTiZ</strong>
+                    <time>15:26:13</time>
+                    <span>1 일째</span>
+                    <span>총 출석일이 2,068일째 입니다.</span>
+                    <span>포인트 10</span>
+                    <div>구매 완료</div>
+                </li>
+            </ul>
+        </section>
+        """
+
+        let snapshot = MeecoHTMLParser().attendanceSnapshot(from: html)
+
+        XCTAssertTrue(snapshot.isCheckedInToday)
+        XCTAssertEqual(snapshot.statusMessage, "오늘 출석 완료")
+        XCTAssertEqual(snapshot.records.first?.nickname, "AlieNaTiZ")
+        XCTAssertEqual(snapshot.records.first?.perfectAttendanceDays, 1)
+        XCTAssertEqual(snapshot.records.first?.totalAttendanceDays, 2068)
+    }
+
+    func testParserTreatsCurrentUserAttendanceRecordAsChecked() throws {
+        let html = """
+        <section>
+            <table>
+                <tr><th>출석여부</th><td>미출석</td></tr>
+            </table>
+            <ul>
+                <li>
+                    <span>39등</span>
+                    <strong>AlieNaTiZ</strong>
+                    <time>15:26:13</time>
+                    <span>1 일째</span>
+                    <span>총 출석일이 2,068일째 입니다.</span>
+                    <span>포인트 10</span>
+                    <div>구매 완료</div>
+                </li>
+            </ul>
+        </section>
+        """
+
+        let snapshot = MeecoHTMLParser().attendanceSnapshot(from: html, accountDisplayName: "alienatiz")
+
+        XCTAssertTrue(snapshot.isCheckedInToday)
+        XCTAssertEqual(snapshot.statusMessage, "오늘 출석 완료")
+    }
+
+    func testParserDoesNotTreatUncheckedAttendanceAsChecked() throws {
+        let html = """
+        <section>
+            <p>오늘 출석 전</p>
+            <table>
+                <tr><th>출석여부</th><td>미출석</td></tr>
+            </table>
+        </section>
+        """
+
+        let snapshot = MeecoHTMLParser().attendanceSnapshot(from: html)
+
+        XCTAssertFalse(snapshot.isCheckedInToday)
+        XCTAssertEqual(snapshot.statusMessage, "오늘 출석 전")
+    }
+
+    func testParserTreatsCompletedAttendanceCellAsChecked() throws {
+        let html = """
+        <section>
+            <table>
+                <tr><th>출석여부</th><td>완료</td></tr>
+            </table>
+        </section>
+        """
+
+        let snapshot = MeecoHTMLParser().attendanceSnapshot(from: html)
+
+        XCTAssertTrue(snapshot.isCheckedInToday)
+        XCTAssertEqual(snapshot.statusMessage, "오늘 출석 완료")
+    }
+
+    func testParserTreatsCompletedAttendanceStatusRowAsChecked() throws {
+        let html = """
+        <section>
+            <table>
+                <tr>
+                    <td class="title">출석여부</td>
+                    <td><span class="label label-success">출석 완료</span></td>
+                </tr>
+            </table>
+        </section>
+        """
+
+        let snapshot = MeecoHTMLParser().attendanceSnapshot(from: html)
+
+        XCTAssertTrue(snapshot.isCheckedInToday)
+        XCTAssertEqual(snapshot.statusMessage, "오늘 출석 완료")
+    }
+
+    func testParserDoesNotTreatBlankAttendanceStatusRowAsChecked() throws {
+        let html = """
+        <section>
+            <table>
+                <tr>
+                    <td>출석여부</td>
+                    <td>-</td>
+                </tr>
+            </table>
+        </section>
+        """
+
+        let snapshot = MeecoHTMLParser().attendanceSnapshot(from: html)
+
+        XCTAssertFalse(snapshot.isCheckedInToday)
+        XCTAssertEqual(snapshot.statusMessage, "오늘 출석 전")
     }
 
     func testParserReadsNotificationSnapshot() throws {
